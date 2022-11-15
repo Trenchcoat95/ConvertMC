@@ -1,0 +1,33 @@
+# some binary files
+*.png
+*root
+*log
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.d
+*.pcm
+
+# Compiled Dynamic libraries
+*.so
+*.so.[0-9]*
+*.dylib
+*.dll
+*.libs
+*.lib
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+
+# Dictionary source files
+G__*.c
+G__*.cxx
+G__*.h
+
+# 
+*.html
+*.list
+fastMCKalman/MC/__pycache__/*.pyc
