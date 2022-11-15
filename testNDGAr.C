@@ -1,7 +1,9 @@
 /*
     gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/aliKalman/test/\"")
+    gSystem->AddIncludePath("-I\"$ConvertMC/Local/\"")
     gSystem->Load("$fastMCKalman/fastMCKalman/aliKalman/test/AliExternalTrackParam.so");
-   .L fastSimulation.cxx++g
+
+   .L  Local/fastSimulation.cxx++g
     .L testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
     testNDGAr(300,kTRUE)
@@ -136,7 +138,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
   resol[0]=0.1;                   
   resol[1]=0.1;
   geom.setLayerRadiusPower(0,nLayerTPC,1,nLayerTPC,1.0,xx0,xrho,resol);
-  for (Int_t iLayer=0; iLayer<geom.fLayerX0.size();iLayer++) {
+  for (size_t iLayer=0; iLayer<geom.fLayerX0.size();iLayer++) {
         geom.fLayerX0[iLayer] = xx0 * kMaterialScaling;
         geom.fLayerRho[iLayer] = xrho * kMaterialScaling;
         geom.fLayerResolRPhi[iLayer] =resol[0];
