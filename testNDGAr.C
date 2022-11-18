@@ -2,15 +2,20 @@
     gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/aliKalman/test/\"")
     gSystem->AddIncludePath("-I\"$ConvertMC/Local/\"")
     gSystem->Load("$fastMCKalman/fastMCKalman/aliKalman/test/AliExternalTrackParam.so");
-
-   .L  Local/fastSimulation.cxx++g
+    .L  Local/fastSimulation.cxx++g
     .L testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
     testNDGAr(300,kTRUE)
-    //initTreeFast()
-    .> a.log
-     testPCStream(5000,kTRUE);
-     .>
+
+    or
+
+    gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/aliKalman/test/\"")
+    gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/MC/\"")
+    gSystem->Load("$fastMCKalman/fastMCKalman/aliKalman/test/AliExternalTrackParam.so");
+    .L $fastMCKalman/fastMCKalman/MC/fastSimulation.cxx++g
+    .L testNDGAr.C++g
+    AliPDG::AddParticlesToPdgDataBase();
+    testNDGAr(300,kTRUE)
 
  */
 #include "fastSimulation.h"
@@ -77,12 +82,10 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
 
   const Int_t   nLayerTPC=277;
   const Int_t   nPoints=nLayerTPC*3;
-  const Float_t xx0=7.8350968e-05;
-  const Float_t xrho=0.0016265266;
-  const Float_t kMaterialScaling=10;      ////Promote to global variable
+  const Float_t xx0=8.37758e-04; //1/X0 cm^-1 for ArCH4 at 10 atm
+  const Float_t xrho=0.016770000; //rho g/cm^3 for ArCH4 at 10 atm
+  const Float_t kMaterialScaling=1;      ////Promote to global variable
   double GArCenter[3]={0,-150.473,1486}; 
-  double GAr_r = 349.9;
-  double GAr_L = 669.6;
   float fSortDistCut = 10.0;
   float fPrintLevel = 0.0;
             
@@ -112,14 +115,31 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
   TChain* tree_source = new TChain("/anatree/GArAnaTree");    
   tree_source->Add("/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/MC/*");
   std::vector<size_t>  *TPCClusterTrkIDNumber = 0;
+  std::vector<size_t>  *TrackIDNumber = 0;
+  std::vector<float>  *TrackStartPX = 0;
+  std::vector<float>  *TrackStartPY = 0;
+  std::vector<float>  *TrackStartPZ = 0;
+  std::vector<float>  *TrackStartQ = 0;
+  std::vector<float>  *TrackStartX = 0;
+  std::vector<float>  *TrackStartY = 0;
+  std::vector<float>  *TrackStartZ = 0;
+  std::vector<float>  *TrackEndPX = 0;
+  std::vector<float>  *TrackEndPY = 0;
+  std::vector<float>  *TrackEndPZ = 0;
+  std::vector<float>  *TrackEndQ = 0;
+  std::vector<float>  *TrackStartX = 0;
+  std::vector<float>  *TrackStartY = 0;
+  std::vector<float>  *TrackStartZ = 0;
   std::vector<float>   *TPCClusterX = 0;
   std::vector<float>   *TPCClusterY = 0;
   std::vector<float>   *TPCClusterZ = 0;
   TBranch        *b_TPCClusterTrkIDNumber;   //!
+  TBranch        *b_TrackIDNumber;
   TBranch        *b_TPCClusterX;   //!
   TBranch        *b_TPCClusterY;   //!
   TBranch        *b_TPCClusterZ;   //!
   tree_source->SetBranchAddress("TPCClusterTrkIDNumber", &TPCClusterTrkIDNumber, &b_TPCClusterTrkIDNumber);
+  tree_source->SetBranchAddress("TrackIDNumber", &TrackIDNumber, &b_TrackIDNumber);
   tree_source->SetBranchAddress("TPCClusterX", &TPCClusterX, &b_TPCClusterX);
   tree_source->SetBranchAddress("TPCClusterY", &TPCClusterY, &b_TPCClusterY);
   tree_source->SetBranchAddress("TPCClusterZ", &TPCClusterZ, &b_TPCClusterZ);
@@ -156,31 +176,24 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
       if(TPCClusterTrkIDNumber->size()==0) continue;
 
 
-      size_t ID = TPCClusterTrkIDNumber->at(0);
+      size_t ID = 0;
       std::vector<std::vector<TVector3>> TrksXYZ;
       std::vector<TVector3> TrkClusterXYZ;
       std::vector<size_t> ID_vector;
-      ID_vector.push_back(ID);
-      for(UInt_t j=0; j<TPCClusterTrkIDNumber->size();j++)
+      for(UInt_t k=0; k<TrackIDNumber->size();k++)
       {
-          TVector3 xyz(TPCClusterX->at(j),TPCClusterY->at(j),TPCClusterZ->at(j));
-
-          if(TPCClusterTrkIDNumber->at(j)==ID)
+          ID = TrackIDNumber->at(k);
+          for(UInt_t j=0; j<TPCClusterTrkIDNumber->size();j++)
           {
-            TrkClusterXYZ.push_back(xyz);
+            TVector3 xyz(TPCClusterX->at(j),TPCClusterY->at(j),TPCClusterZ->at(j));
+            if(ID==TPCClusterTrkIDNumber->at(j)) TrkClusterXYZ.push_back(xyz);
           }
-          else
-          {
-            ID=TPCClusterTrkIDNumber->at(j);
-            ID_vector.push_back(ID);
-            TrksXYZ.push_back(TrkClusterXYZ);
-            TrkClusterXYZ.clear();
-            TrkClusterXYZ.push_back(xyz);
-          }
+          ID_vector.push_back(ID);
+          TrksXYZ.push_back(TrkClusterXYZ);
+          TrkClusterXYZ.clear();
       }
-      ID_vector.push_back(ID);
-      TrksXYZ.push_back(TrkClusterXYZ);
 
+      
       for(size_t t=0; t<TrksXYZ.size(); t++)
       {
           std::cout<<"ID: "<<ID_vector.at(t)<<std::endl;
@@ -200,6 +213,8 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
           ////// Create particle object with ALICE-like global coordinates
           fastParticle particle(hlb.size()+1);
           particle.fAddMSsmearing=true;
+          particle.fAddPadsmearing=false;
+          particle.fUseMCInfo=false;
           particle.fgStreamer=pcstream;
           particle.gid=ID_vector.at(t);
           particle.fDecayLength=0;
@@ -222,5 +237,31 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
   }
   delete pcstream;
   timer.Print();
+}
+
+
+void initTreeFast(const char * inputList="fastParticle.list"){
+  const char* inputListPath=gSystem->ExpandPathName(inputList);
+  treeFast  = AliXRDPROOFtoolkit::MakeChainRandom(inputListPath,"fastPart",0,10000);
+  treeTurn  = AliXRDPROOFtoolkit::MakeChainRandom(inputListPath,"turn",0,10000);
+  treeUnit0  = AliXRDPROOFtoolkit::MakeChainRandom(inputListPath,"UnitTestDumpCorrectForMaterial",0,10000);
+  treeSeed  = AliXRDPROOFtoolkit::MakeChainRandom(inputListPath,"seedDump",0,10000);
+  treeFast->SetMarkerStyle(21);
+  treeFast->SetMarkerSize(0.5);
+   treeUnit0->SetMarkerStyle(21);
+  treeUnit0->SetMarkerSize(0.5);
+  treeSeed->BuildIndex("gid");
+  treeFast->BuildIndex("gid");
+  treeSeed->AddFriend(treeFast,"F");
+
+  //AliDrawStyle::SetDefaults();
+  //AliDrawStyle::ApplyStyle("figTemplate");
+  gStyle->SetOptTitle(1);
+  fastParticle::setAliases(*treeFast);
+  //
+  treeUnit0->SetAlias("dEdxOutIn","AliExternalTrackParam::BetheBlochSolid(0+paramStepRK.P()/mass)/AliExternalTrackParam::BetheBlochSolid(paramIn.P()/mass)");
+  treeUnit0->SetAlias("dEdxIn","AliExternalTrackParam::BetheBlochSolid(paramIn.P()/mass+0)");
+  treeUnit0->SetAlias("dEdxOut","AliExternalTrackParam::BetheBlochSolid(paramRK.P()/mass+0)");
+
 }
 

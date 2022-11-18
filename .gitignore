@@ -30,4 +30,5 @@ G__*.h
 # 
 *.html
 *.list
+*.gdml
 fastMCKalman/MC/__pycache__/*.pyc
