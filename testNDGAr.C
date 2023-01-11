@@ -13,7 +13,7 @@
     gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/MC/\"")
     gSystem->Load("$fastMCKalman/fastMCKalman/aliKalman/test/AliExternalTrackParam.so");
     .L $fastMCKalman/fastMCKalman/MC/fastSimulation.cxx++g
-    .L testNDGAr.C++g
+    .L $ConvertMC/testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
     testNDGAr(300,kTRUE)
 
@@ -26,6 +26,7 @@
 #include "AliXRDPROOFtoolkit.h"
 //#include "AliDrawStyle.h"
 #include "TStyle.h"
+#include "TVector3.h"
 #include "TSystem.h"
 #include "TPad.h"
 #include "TCanvas.h"
@@ -41,25 +42,71 @@ TChain * treeTurn=0;
 TChain * treeUnit0=0;
 TChain * treeSeed=0;
 
-void BuildParticle(fastParticle &particle, std::vector<TVector3> ClusterXYZ, double Center[3], fastGeometry geom)
+size_t ClosestPoint(std::vector<TVector3> trajxyz, TVector3 ClusterXYZ)
+{
+  Double_t dist = 10000;
+  size_t index=0;
+  for(size_t i=0; i<trajxyz.size(); i++)
+  {
+    double cl[] = {ClusterXYZ.X(),ClusterXYZ.Y(),ClusterXYZ.Z()};
+    double traj[] = {trajxyz.at(i).X(),trajxyz.at(i).Y(),trajxyz.at(i).Z()};
+    TVector3 diff = trajxyz.at(i)-ClusterXYZ;
+    Double_t checkdist = diff.Mag2();
+    if(checkdist<dist)
+    {
+      dist=checkdist;
+      index=i;
+    }
+
+  }
+  return index;
+}
+
+Int_t BuildParticle(fastParticle &particle, std::vector<TVector3> ClusterXYZ, double Center[3], fastGeometry geom, 
+                   std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode)
 {
           uint fMaxLayer = 0;
+          TParticlePDG *p = TDatabasePDG::Instance()->GetParticle(PDGcode);
+          if (p == nullptr) {
+            ::Error("fastParticle::simulateParticle", "Invalid pdgCode %ld", PDGcode);
+            return -1;
+          }
+          Short_t sign = p->Charge() / 3.;
+          Float_t mass = p->Mass();
+          particle.fMassMC=mass;
+
           for(size_t k=0;k<ClusterXYZ.size();k++) 
           {
+
+              Double_t xyz_conv[3]= {ClusterXYZ.at(k).Z()-Center[2],
+                                ClusterXYZ.at(k).Y()-Center[1],
+                                ClusterXYZ.at(k).X()-Center[0]};
+
+              size_t closest = ClosestPoint(trajxyz,ClusterXYZ.at(k));
+              Double_t pxyz_conv[3]= {trajpxyz.at(closest).Z(),
+                                      trajpxyz.at(closest).Y(),
+                                      trajpxyz.at(closest).X()};
+
+              Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
+              Double_t radius=sqrt(xyz_conv[1]*xyz_conv[1]+xyz_conv[0]*xyz_conv[0]);
+              Double_t X_loc =  xyz_conv[0]*cos(alpha) + xyz_conv[1]*sin(alpha);
+              Double_t Y_loc = -xyz_conv[0]*sin(alpha) + xyz_conv[1]*cos(alpha);
+              //Double_t param[5]={Y_loc,xyz_conv.Z(),0,0,0};              
+              //particle.fParamMC[k].SetParamOnly(X_loc,alpha,param);
+              double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+              AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
+              AliExternalTrackParam4D param4D(param,mass,1);
+              Bool_t status = param4D.Rotate(alpha);
+              if(!status)
+              {
+                continue;
+              }
               particle.fDirection.resize(k+1);
               particle.fParamMC.resize(k+1);
               particle.fLayerIndex.resize(k+1);
-
-              TVector3 xyz_conv(ClusterXYZ.at(k).Z()-Center[2],
-                                ClusterXYZ.at(k).Y()-Center[1],
-                                ClusterXYZ.at(k).X()-Center[0]);
-
-              Double_t alpha=TMath::ATan2(xyz_conv.Y(),xyz_conv.X());
-              Double_t radius=sqrt(xyz_conv.Y()*xyz_conv.Y()+xyz_conv.X()*xyz_conv.X());
-              Double_t X_loc =  xyz_conv.X()*cos(alpha) + xyz_conv.Y()*sin(alpha);
-              Double_t Y_loc = -xyz_conv.X()*sin(alpha) + xyz_conv.Y()*cos(alpha);
-              Double_t param[5]={Y_loc,xyz_conv.Z(),0,0,0};
-              particle.fParamMC[k].SetParamOnly(X_loc,alpha,param);
+              particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
+              particle.fParamMC[k].Rotate(alpha);
+              //particle.fParamMC[k].Rotate(alpha);
               uint indexR = uint(std::upper_bound (geom.fLayerRadius.begin(),geom.fLayerRadius.end(), radius)-geom.fLayerRadius.begin());
               particle.fLayerIndex[k] = indexR;
               if(k!=0)
@@ -76,11 +123,95 @@ void BuildParticle(fastParticle &particle, std::vector<TVector3> ClusterXYZ, dou
               if (indexR>fMaxLayer) fMaxLayer=indexR;
           }
           if(particle.fDirection.size()>1) particle.fDirection[0]=particle.fDirection[1];
+
+          return 1;
+}
+
+Int_t BuildParticleIdeal(fastParticle &particle, double Center[3], fastGeometry geom, 
+                   std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode)
+{
+          uint fMaxLayer = 0;
+          TParticlePDG *p = TDatabasePDG::Instance()->GetParticle(PDGcode);
+          if (p == nullptr) {
+            ::Error("fastParticle::simulateParticle", "Invalid pdgCode %ld", PDGcode);
+            return -1;
+          }
+          Short_t sign = 1 * p->Charge() / 3.;
+          Float_t mass = p->Mass();
+          particle.fMassMC=mass;
+
+          for(size_t k=0;k<trajxyz.size();k++) 
+          {
+
+              Double_t xyz_conv[3]= {(trajxyz.at(k).Z()-Center[2]),
+                                trajxyz.at(k).Y()-Center[1],
+                                trajxyz.at(k).X()-Center[0]};
+
+              Double_t pxyz_conv[3]= {(trajpxyz.at(k).Z()),
+                                      trajpxyz.at(k).Y(),
+                                      trajpxyz.at(k).X()};
+
+              Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
+              Double_t radius=sqrt(xyz_conv[1]*xyz_conv[1]+xyz_conv[0]*xyz_conv[0]);
+              Double_t X_loc =  xyz_conv[0]*cos(alpha) + xyz_conv[1]*sin(alpha);
+              Double_t Y_loc = -xyz_conv[0]*sin(alpha) + xyz_conv[1]*cos(alpha);
+              //Double_t param[5]={Y_loc,xyz_conv.Z(),0,0,0};              
+              //particle.fParamMC[k].SetParamOnly(X_loc,alpha,param);
+              double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+              AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
+              AliExternalTrackParam4D param4D(param,mass,1);
+              Bool_t status = param4D.Rotate(alpha);
+              if(!status)
+              {
+                continue;
+              }
+              particle.fDirection.resize(k+1);
+              particle.fParamMC.resize(k+1);
+              particle.fLayerIndex.resize(k+1);
+              particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
+              particle.fParamMC[k].Rotate(alpha);
+              //particle.fParamMC[k].Rotate(alpha);
+              uint indexR = uint(std::upper_bound (geom.fLayerRadius.begin(),geom.fLayerRadius.end(), radius)-geom.fLayerRadius.begin());
+              particle.fLayerIndex[k] = indexR;
+              if(k!=0)
+              {
+                TVector3 xyz_prev(trajxyz.at(k-1).Z()-Center[2],
+                                  trajxyz.at(k-1).Y()-Center[1],
+                                  trajxyz.at(k-1).X()-Center[0]);
+                Double_t r_prev = sqrt(xyz_prev.Y()*xyz_prev.Y()+xyz_prev.X()*xyz_prev.X());
+                if((radius/r_prev)>1) particle.fDirection[k] = +1;
+                else particle.fDirection[k] = -1;
+              }
+              else particle.fDirection[k] = +1;
+
+              if (indexR>fMaxLayer) fMaxLayer=indexR;
+          }
+          if(particle.fDirection.size()>1) particle.fDirection[0]=particle.fDirection[1];
+
+          return 1;
+}
+
+
+void CombineParticle(fastParticle &particle, fastParticle part1, fastParticle part2)
+{
+
+          particle.fParamMC.resize(part1.fParamMC.size());
+          particle.fParamMC = part1.fParamMC;
+
+          particle.fParamIn.resize(part1.fParamRefit.size());
+          particle.fParamIn = part1.fParamRefit;
+          particle.fStatusMaskIn.resize(part1.fStatusMaskRefit.size());
+          particle.fStatusMaskIn = part1.fStatusMaskRefit;
+
+          particle.fParamOut.resize(part2.fParamRefit.size());
+          for(size_t i=0; i<part2.fParamRefit.size(); i++) particle.fParamIn[i]=part2.fParamRefit[part2.fParamRefit.size()-1-i];
+          particle.fStatusMaskOut.resize(part2.fStatusMaskRefit.size());
+          for(size_t i=0; i<part2.fStatusMaskRefit.size(); i++) particle.fStatusMaskOut[i]=part2.fStatusMaskRefit[part2.fStatusMaskRefit.size()-1-i];
 }
 
 void testNDGAr(Int_t nEv, bool dumpStream=1){
 
-  const Int_t   nLayerTPC=277;
+  const Int_t   nLayerTPC=278;
   const Int_t   nPoints=nLayerTPC*3;
   const Float_t xx0=8.37758e-04; //1/X0 cm^-1 for ArCH4 at 10 atm
   const Float_t xrho=0.016770000; //rho g/cm^3 for ArCH4 at 10 atm
@@ -115,34 +246,96 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
   TChain* tree_source = new TChain("/anatree/GArAnaTree");    
   tree_source->Add("/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/MC/*");
   std::vector<size_t>  *TPCClusterTrkIDNumber = 0;
+  std::vector<int>  *TPCClusterMCindex = 0;
   std::vector<size_t>  *TrackIDNumber = 0;
-  std::vector<float>  *TrackStartPX = 0;
-  std::vector<float>  *TrackStartPY = 0;
-  std::vector<float>  *TrackStartPZ = 0;
-  std::vector<float>  *TrackStartQ = 0;
-  std::vector<float>  *TrackStartX = 0;
-  std::vector<float>  *TrackStartY = 0;
-  std::vector<float>  *TrackStartZ = 0;
-  std::vector<float>  *TrackEndPX = 0;
-  std::vector<float>  *TrackEndPY = 0;
-  std::vector<float>  *TrackEndPZ = 0;
-  std::vector<float>  *TrackEndQ = 0;
-  std::vector<float>  *TrackStartX = 0;
-  std::vector<float>  *TrackStartY = 0;
-  std::vector<float>  *TrackStartZ = 0;
+  std::vector<int>  *TrackMCindex = 0;
+  std::vector<int>  *TrajMCPIndex = 0;
+  std::vector<int>  *MCTrkID = 0;
+  std::vector<int>     *PDG = 0;
   std::vector<float>   *TPCClusterX = 0;
   std::vector<float>   *TPCClusterY = 0;
   std::vector<float>   *TPCClusterZ = 0;
+  std::vector<float>   *TrajMCPPX = 0;
+  std::vector<float>   *TrajMCPPY = 0;
+  std::vector<float>   *TrajMCPPZ = 0;
+  std::vector<float>   *TrajMCPX = 0;
+  std::vector<float>   *TrajMCPY = 0;
+  std::vector<float>   *TrajMCPZ = 0;
+  std::vector<float> *TrackStartX = 0;
+  std::vector<float> *TrackStartY = 0;
+  std::vector<float> *TrackStartZ     =0;
+  std::vector<float> *TrackStartPX    =0;
+  std::vector<float> *TrackStartPY    =0;
+  std::vector<float> *TrackStartPZ    =0;
+  std::vector<int>   *TrackStartQ     = 0;
+  std::vector<float> *TrackEndX       =0;
+  std::vector<float> *TrackEndY       =0;
+  std::vector<float> *TrackEndZ       =0;
+  std::vector<float> *TrackEndPX      =0;
+  std::vector<float> *TrackEndPY      =0;
+  std::vector<float> *TrackEndPZ      =0;
+  std::vector<int>   *TrackEndQ       =0;
   TBranch        *b_TPCClusterTrkIDNumber;   //!
+  TBranch        *b_TPCClusterMCindex;
   TBranch        *b_TrackIDNumber;
+  TBranch        *b_TrackMCindex;
+  TBranch        *b_TrajMCPIndex;
+  TBranch        *b_MCTrkID;
+  TBranch        *b_PDG;
   TBranch        *b_TPCClusterX;   //!
   TBranch        *b_TPCClusterY;   //!
   TBranch        *b_TPCClusterZ;   //!
+  TBranch        *b_TrajMCPPX;   //!
+  TBranch        *b_TrajMCPPY;   //!
+  TBranch        *b_TrajMCPPZ;   //!
+  TBranch        *b_TrajMCPX;   //!
+  TBranch        *b_TrajMCPY;   //!
+  TBranch        *b_TrajMCPZ;   //!
+  TBranch *b_TrackStartX ;
+  TBranch *b_TrackStartY ;
+  TBranch *b_TrackStartZ     ;
+  TBranch *b_TrackStartPX    ;
+  TBranch *b_TrackStartPY    ;
+  TBranch *b_TrackStartPZ    ;
+  TBranch   *b_TrackStartQ     ;
+  TBranch *b_TrackEndX       ;
+  TBranch *b_TrackEndY       ;
+  TBranch *b_TrackEndZ       ;
+  TBranch *b_TrackEndPX      ;
+  TBranch *b_TrackEndPY      ;
+  TBranch *b_TrackEndPZ      ;
+  TBranch   *b_TrackEndQ       ;
   tree_source->SetBranchAddress("TPCClusterTrkIDNumber", &TPCClusterTrkIDNumber, &b_TPCClusterTrkIDNumber);
+  tree_source->SetBranchAddress("TPCClusterMCindex", &TPCClusterMCindex, &b_TPCClusterMCindex);
   tree_source->SetBranchAddress("TrackIDNumber", &TrackIDNumber, &b_TrackIDNumber);
+  tree_source->SetBranchAddress("TrackMCindex", &TrackMCindex, &b_TrackMCindex);
+  tree_source->SetBranchAddress("TrajMCPIndex", &TrajMCPIndex, &b_TrajMCPIndex);
+  tree_source->SetBranchAddress("MCTrkID", &MCTrkID, &b_MCTrkID);
+  tree_source->SetBranchAddress("PDG", &PDG, &b_PDG);
   tree_source->SetBranchAddress("TPCClusterX", &TPCClusterX, &b_TPCClusterX);
   tree_source->SetBranchAddress("TPCClusterY", &TPCClusterY, &b_TPCClusterY);
   tree_source->SetBranchAddress("TPCClusterZ", &TPCClusterZ, &b_TPCClusterZ);
+  tree_source->SetBranchAddress("TrajMCPPX", &TrajMCPPX, &b_TrajMCPPX);
+  tree_source->SetBranchAddress("TrajMCPPY", &TrajMCPPY, &b_TrajMCPPY);
+  tree_source->SetBranchAddress("TrajMCPPZ", &TrajMCPPZ, &b_TrajMCPPZ);
+  tree_source->SetBranchAddress("TrajMCPX", &TrajMCPX, &b_TrajMCPX);
+  tree_source->SetBranchAddress("TrajMCPY", &TrajMCPY, &b_TrajMCPY);
+  tree_source->SetBranchAddress("TrajMCPZ", &TrajMCPZ, &b_TrajMCPZ);
+  tree_source->SetBranchAddress("TrackStartX", &TrackStartX, &b_TrackStartX);
+  tree_source->SetBranchAddress("TrackStartY", &TrackStartY, &b_TrackStartY);
+  tree_source->SetBranchAddress("TrackStartZ", &TrackStartZ, &b_TrackStartZ);
+  tree_source->SetBranchAddress("TrackStartPX", &TrackStartPX, &b_TrackStartPX);
+  tree_source->SetBranchAddress("TrackStartPY", &TrackStartPY, &b_TrackStartPY);
+  tree_source->SetBranchAddress("TrackStartPZ", &TrackStartPZ, &b_TrackStartPZ);
+  tree_source->SetBranchAddress("TrackStartQ", &TrackStartQ, &b_TrackStartQ);
+  tree_source->SetBranchAddress("TrackEndX", &TrackEndX, &b_TrackEndX);
+  tree_source->SetBranchAddress("TrackEndY", &TrackEndY, &b_TrackEndY);
+  tree_source->SetBranchAddress("TrackEndZ", &TrackEndZ, &b_TrackEndZ);
+  tree_source->SetBranchAddress("TrackEndPX", &TrackEndPX, &b_TrackEndPX);
+  tree_source->SetBranchAddress("TrackEndPY", &TrackEndPY, &b_TrackEndPY);
+  tree_source->SetBranchAddress("TrackEndPZ", &TrackEndPZ, &b_TrackEndPZ);
+  tree_source->SetBranchAddress("TrackEndQ", &TrackEndQ, &b_TrackEndQ);
+
   int nEvSource = tree_source->GetEntries();
   nEv = std::min(nEv,nEvSource);
   
@@ -173,31 +366,71 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
   for (Int_t i=0; i<nEv; i++){
  
       tree_source->GetEntry(i);
-      if(TPCClusterTrkIDNumber->size()==0) continue;
+      if(TrackIDNumber->size()==0) continue;
+
+
 
 
       size_t ID = 0;
+      size_t MCID = 0;
       std::vector<std::vector<TVector3>> TrksXYZ;
       std::vector<TVector3> TrkClusterXYZ;
       std::vector<size_t> ID_vector;
+      std::vector<int> MCID_vector;
       for(UInt_t k=0; k<TrackIDNumber->size();k++)
       {
           ID = TrackIDNumber->at(k);
+          MCID = TrackMCindex->at(k);
           for(UInt_t j=0; j<TPCClusterTrkIDNumber->size();j++)
           {
             TVector3 xyz(TPCClusterX->at(j),TPCClusterY->at(j),TPCClusterZ->at(j));
             if(ID==TPCClusterTrkIDNumber->at(j)) TrkClusterXYZ.push_back(xyz);
           }
           ID_vector.push_back(ID);
+          MCID_vector.push_back(MCID);
           TrksXYZ.push_back(TrkClusterXYZ);
           TrkClusterXYZ.clear();
       }
 
+
       
       for(size_t t=0; t<TrksXYZ.size(); t++)
-      {
-          std::cout<<"ID: "<<ID_vector.at(t)<<std::endl;
+      {    
+          Double_t TStX = TrackStartZ->at(t)- GArCenter[2];
+          Double_t TStY = TrackStartY->at(t)- GArCenter[1];
+          Double_t TStZ =  TrackStartX->at(t)- GArCenter[0];
+          Double_t TStPX = TrackStartPZ->at(t);
+          Double_t TStPY = TrackStartPY->at(t);
+          Double_t TStPZ =  TrackStartPX->at(t);
+          int TStQ = TrackStartQ->at(t);
+          Double_t TEndX = TrackEndZ->at(t)- GArCenter[2];
+          Double_t TEndY = TrackEndY->at(t)- GArCenter[1];
+          Double_t TEndZ =  TrackEndX->at(t)- GArCenter[0];
+          Double_t TEndPX = TrackEndPZ->at(t);
+          Double_t TEndPY = TrackEndPY->at(t);
+          Double_t TEndPZ =  TrackEndPX->at(t);
+          int TEndQ = TrackEndQ->at(t);
+          std::vector<TVector3> trajxyz;
+          std::vector<TVector3> trajpxyz;
+          for(size_t u=0; u<TrajMCPX->size(); u++)
+          {
+            if(MCID_vector.at(t)==TrajMCPIndex->at(u))
+            {
+              TVector3 jxyz(TrajMCPX->at(u),TrajMCPY->at(u),TrajMCPZ->at(u));
+              TVector3 pjxyz(TrajMCPPX->at(u),TrajMCPPY->at(u),TrajMCPPZ->at(u));
+              double Cluster[] = {TrksXYZ.at(t).at(0).X(),TrksXYZ.at(t).at(0).Y(),TrksXYZ.at(t).at(0).Z()};
+              trajxyz.push_back(jxyz);
+              trajpxyz.push_back(pjxyz);
+            }
+          }
 
+          if(trajxyz.size()==0) continue;
+
+          
+          long PDGcode=PDG->at(MCID_vector.at(t));
+
+          if(PDGcode==0 || abs(PDGcode)==14 || abs(PDGcode)!=13) continue;
+          std::cout<<"ID: "<<ID_vector.at(t)<<" PDG: "<<PDGcode<<std::endl;
           ///////////////////////////////////////////// Sort TPC Clusters
           std::vector<int> hlf;
           std::vector<int> hlb;
@@ -218,17 +451,60 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
           particle.fgStreamer=pcstream;
           particle.gid=ID_vector.at(t);
           particle.fDecayLength=0;
-          BuildParticle(particle,TrkClusterXYZb_NDGAr,GArCenter,geom);
+          //BuildParticle(particle,TrkClusterXYZb_NDGAr,GArCenter,geom,trajxyz,trajpxyz,PDGcode);
+          BuildParticleIdeal(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);
+          if(particle.fParamMC.size()==0) continue;
+          particle.reconstructParticleFull(geom,PDGcode,10000);
+          //particle.reconstructParticleFullOut(geom,PDGcode,10000);
+          //particle.refitParticle();
+          /*
+          fastParticle particle2(hlf.size()+1);
+          particle2.fAddMSsmearing=true;
+          particle2.fAddPadsmearing=false;
+          particle2.fUseMCInfo=false;
+          particle2.fgStreamer=pcstream;
+          particle2.gid=ID_vector.at(t);
+          particle2.fDecayLength=0;
+          BuildParticle(particle2,TrkClusterXYZf_NDGAr,GArCenter,geom);
 
-          particle.reconstructParticleFull(geom,211,particle.fLayerIndex[0]);
+          particle2.reconstructParticleFull(geom,211,particle.fLayerIndex[0]);
+          particle2.reconstructParticleFullOut(geom,211,particle.fLayerIndex[0]);
+          particle2.refitParticle();
+
+          fastParticle particletot(hlf.size()+1);
+          particletot.fAddMSsmearing=true;
+          particletot.fAddPadsmearing=false;
+          particletot.fUseMCInfo=false;
+          particletot.fgStreamer=pcstream;
+          particletot.gid=ID_vector.at(t);
+          particletot.fDecayLength=0;
+          CombineParticle(particletot,particle,particle2);
+          particletot.refitParticle();
+          */
 
           if (dumpStream==kFALSE) continue;
           if (tree) tree->Fill();
           else {
             (*pcstream) << "fastPart" <<
                         "i=" << i <<
+                        "TStQ=" << TStQ <<
+                        "TStX=" << TStX <<
+                        "TStY=" << TStY <<
+                        "TStZ=" << TStZ <<
+                        "TStPX=" << TStPX <<
+                        "TStPY=" << TStPY <<
+                        "TStPZ=" << TStPZ <<
+                        "TEndQ=" << TEndQ <<
+                        "TEndX=" << TEndX <<
+                        "TEndY=" << TEndY <<
+                        "TEndZ=" << TEndZ <<
+                        "TEndPX=" << TEndPX <<
+                        "TEndPY=" << TEndPY <<
+                        "TEndPZ=" << TEndPZ <<
                         "geom.="<<&geom<<
                         "part.=" << &particle <<
+                        //"part2.="<< &particle2 <<
+                        //"parttot.="<< &particle2 <<
                         "\n";
             tree=  ((*pcstream) << "fastPart").GetTree();
           }       

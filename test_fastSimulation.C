@@ -39,6 +39,30 @@ extern TChain * treeSeed;
 extern TChain * treeFast;
 
 
+/// Test pull of seeds
+/// the seeding pulls at the big snp are underestimated - because of rotation - we call test only for smaller |fP[2]|<0.6 further from 1
+void testPullsSeed() {
+  // Here we should make unit tests - it will work only up to some relative energy loss
+  // treeSeed->Draw("log(paramSeed.P()/input.P()):log(input2.P()/input.P())","sign0>0");
+
+  //
+  TF1 *mygauss = new TF1("mygauss", "gaus");
+  for (int version=0; version<=1; version++) {
+    for (int iPar = 0; iPar <= 4; iPar++) {
+      treeSeed->Draw(Form("(seed.fP[%d]-input.fP[%d])/sqrt(seed.fC[%d])>>his(100,-6,6)", iPar, iPar, AliExternalTrackParam::GetIndex(iPar, iPar)),
+                     Form("version==%d&&abs(seed.fP[2])<0.6",version), "");
+      treeSeed->GetHistogram()->Fit("mygauss", "q");
+      bool isOK = abs(1 - mygauss->GetParameter(2)) < 5 * mygauss->GetParError(2);
+      float rms=treeSeed->GetHistogram()->GetRMS();
+      if (isOK) {
+        ::Info(Form("testFastTracker seed pull test P%d - version %d",iPar,version), "pullAnalytical - OK - %2.2f\t%2.2f", mygauss->GetParameter(2),rms);
+      } else {
+        ::Error(Form("testFastTracker seed pull test P%d - version %d",iPar,version), "pullAnalytical- FAILED- %2.2f\t%2.2f", mygauss->GetParameter(2),rms);
+      }
+    }
+  }
+}
+
 void drawTrackStatus(int counter, std::string Id = "In", std::string Error = "0x1"){
   treeFast->SetMarkerColor(1);   /// all MC
   treeFast->Draw("gyMC:gxMC","","",1,counter);
@@ -74,3 +98,4 @@ void SetList(std::string Id = "In", std::string Error = "0x1"){
   treeFast->SetMarkerSize(1.5);
   gStyle->SetPalette(55);
 }
+
