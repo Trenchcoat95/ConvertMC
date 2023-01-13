@@ -142,7 +142,7 @@ Int_t BuildParticleIdeal(fastParticle &particle, double Center[3], fastGeometry 
 
           for(size_t k=0;k<trajxyz.size();k++) 
           {
-
+              Bool_t invert = kFALSE;
               Double_t xyz_conv[3]= {(trajxyz.at(k).Z()-Center[2]),
                                 trajxyz.at(k).Y()-Center[1],
                                 trajxyz.at(k).X()-Center[0]};
@@ -160,16 +160,45 @@ Int_t BuildParticleIdeal(fastParticle &particle, double Center[3], fastGeometry 
               double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
               AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
               AliExternalTrackParam4D param4D(param,mass,1);
+              Double_t pxyz_conv_test[3];
+              param4D.GetPxPyPz(pxyz_conv_test);
               Bool_t status = param4D.Rotate(alpha);
-              if(!status)
+              Double_t pxyz_inv[3] = {-pxyz_conv[0],-pxyz_conv[1],-pxyz_conv[2]};
+
+              if(abs(pxyz_conv_test[0]-pxyz_conv[0])>0.00001)
               {
-                continue;
+                // AliExternalTrackParam param_inv(xyz_conv,pxyz_inv,covar,sign);
+                // AliExternalTrackParam4D param4D_inv(param_inv,mass,1);
+                // status = param4D_inv.Rotate(alpha);
+                // Double_t pxyz_inv_test[3];
+                // param4D_inv.GetPxPyPz(pxyz_inv_test);
+                // param4D = param4D_inv;
+                // Double_t pxyz_inv_test2[3];
+                // param4D.GetPxPyPz(pxyz_inv_test2);
+                invert=kTRUE;
               }
+
               particle.fDirection.resize(k+1);
               particle.fParamMC.resize(k+1);
               particle.fLayerIndex.resize(k+1);
-              particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
-              particle.fParamMC[k].Rotate(alpha);
+              if(status)
+              {
+                if(!invert)
+                {
+                  particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
+                  particle.fParamMC[k].Rotate(alpha);
+                }
+                else
+                {
+                  particle.fParamMC[k].Set(xyz_conv,pxyz_inv,covar,-sign);
+                  particle.fParamMC[k].Rotate(alpha);
+                }
+              }
+              else
+              {
+                double ptemp[] = {Y_loc,xyz_conv[2],0,0,0};
+                particle.fParamMC[k].SetParamOnly(X_loc,alpha,ptemp);
+              }
               //particle.fParamMC[k].Rotate(alpha);
               uint indexR = uint(std::upper_bound (geom.fLayerRadius.begin(),geom.fLayerRadius.end(), radius)-geom.fLayerRadius.begin());
               particle.fLayerIndex[k] = indexR;
@@ -346,7 +375,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
 
   /////////////////////////////////////////////////////////////////////////////////Build the detector geometry
   fastGeometry geom(nLayerTPC+1);
-  geom.fBz=5;
+  geom.fBz=-5;
   float resol[2]={0.0001,0.0001};
   resol[0]=0.1;                   
   resol[1]=0.1;
