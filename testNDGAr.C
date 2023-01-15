@@ -167,9 +167,9 @@ Int_t BuildParticleIdeal(fastParticle &particle, double Center[3], fastGeometry 
 
               if(abs(pxyz_conv_test[0]-pxyz_conv[0])>0.00001)
               {
-                // AliExternalTrackParam param_inv(xyz_conv,pxyz_inv,covar,sign);
-                // AliExternalTrackParam4D param4D_inv(param_inv,mass,1);
-                // status = param4D_inv.Rotate(alpha);
+                AliExternalTrackParam param_inv(xyz_conv,pxyz_inv,covar,sign);
+                AliExternalTrackParam4D param4D_inv(param_inv,mass,1);
+                status = param4D_inv.Rotate(alpha);
                 // Double_t pxyz_inv_test[3];
                 // param4D_inv.GetPxPyPz(pxyz_inv_test);
                 // param4D = param4D_inv;
@@ -484,8 +484,8 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
           BuildParticleIdeal(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);
           if(particle.fParamMC.size()==0) continue;
           particle.reconstructParticleFull(geom,PDGcode,10000);
-          //particle.reconstructParticleFullOut(geom,PDGcode,10000);
-          //particle.refitParticle();
+          particle.reconstructParticleFullOut(geom,PDGcode,10000);
+          particle.refitParticle();
           /*
           fastParticle particle2(hlf.size()+1);
           particle2.fAddMSsmearing=true;
