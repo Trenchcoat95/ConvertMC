@@ -261,14 +261,14 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
   TBranch *b_TrackStartPX    ;
   TBranch *b_TrackStartPY    ;
   TBranch *b_TrackStartPZ    ;
-  TBranch   *b_TrackStartQ     ;
+  TBranch  *b_TrackStartQ     ;
   TBranch *b_TrackEndX       ;
   TBranch *b_TrackEndY       ;
   TBranch *b_TrackEndZ       ;
   TBranch *b_TrackEndPX      ;
   TBranch *b_TrackEndPY      ;
   TBranch *b_TrackEndPZ      ;
-  TBranch   *b_TrackEndQ       ;
+  TBranch  *b_TrackEndQ       ;
   tree_source->SetBranchAddress("TPCClusterTrkIDNumber", &TPCClusterTrkIDNumber, &b_TPCClusterTrkIDNumber);
   tree_source->SetBranchAddress("TPCClusterMCindex", &TPCClusterMCindex, &b_TPCClusterMCindex);
   tree_source->SetBranchAddress("TrackIDNumber", &TrackIDNumber, &b_TrackIDNumber);
@@ -419,83 +419,62 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
           std::vector<TVector3> trajpxyzf_NDGAr;
           ClosestTrajectory(trajxyz,trajpxyz,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr);
 
-          ////// Create particle object with ALICE-like global coordinates
-          fastParticle particle(hlb.size()+1);
-          particle.fAddMSsmearing=true;
-          particle.fAddPadsmearing=false;
-          particle.fUseMCInfo=false;
-          particle.fgStreamer=pcstream;
-          particle.gid=ID_vector.at(t);
-          particle.fDecayLength=0;
         
           if(Ideal) {
+            ////// Create particle object with ALICE-like global coordinates
+            fastParticle particle(trajxyz.size()+1);
+            particle.fAddMSsmearing=true;
+            particle.fAddPadsmearing=false;
+            particle.fUseMCInfo=false;
+            particle.fgStreamer=pcstream;
+            particle.gid=ID_vector.at(t);
+            particle.fDecayLength=0;
             BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  //////Built the ALICE particle with the MC trajectory xyz and pxyz points 
             if(particle.fParamMC.size()==0) continue;
             particle.reconstructParticleFull(geom,PDGcode,10000);
             particle.reconstructParticleFullOut(geom,PDGcode,10000);
             particle.refitParticle();
+            if (dumpStream==kFALSE) continue;
+            if (tree) tree->Fill();
+            else {
+              (*pcstream) << "fastPart" <<
+                          "i=" << i <<
+                          "TStQ=" << TStQ <<
+                          "TStX=" << TStX <<
+                          "TStY=" << TStY <<
+                          "TStZ=" << TStZ <<
+                          "TStPX=" << TStPX <<
+                          "TStPY=" << TStPY <<
+                          "TStPZ=" << TStPZ <<
+                          "TEndQ=" << TEndQ <<
+                          "TEndX=" << TEndX <<
+                          "TEndY=" << TEndY <<
+                          "TEndZ=" << TEndZ <<
+                          "TEndPX=" << TEndPX <<
+                          "TEndPY=" << TEndPY <<
+                          "TEndPZ=" << TEndPZ <<
+                          "geom.="<<&geom<<
+                          "part.=" << &particle <<
+                          "\n";
+              tree=  ((*pcstream) << "fastPart").GetTree();
+            }
           }
           else
           {
+            ////// Create particle object with ALICE-like global coordinates
+            fastParticle particle(hlf.size()+1);
+            particle.fAddMSsmearing=true;
+            particle.fAddPadsmearing=false;
+            particle.fUseMCInfo=false;
+            particle.fgStreamer=pcstream;
+            particle.gid=ID_vector.at(t);
+            particle.fDecayLength=0;
             BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  /////Build the ALICE particle with Track XYZClusters and closest MC pxyz
             if(particle.fParamMC.size()==0) continue;
             particle.reconstructParticleFull(geom,PDGcode,10000);
             particle.reconstructParticleFullOut(geom,PDGcode,10000);
             particle.refitParticle();
-          }
-
-
-          /*
-          fastParticle particle2(hlf.size()+1);
-          particle2.fAddMSsmearing=true;
-          particle2.fAddPadsmearing=false;
-          particle2.fUseMCInfo=false;
-          particle2.fgStreamer=pcstream;
-          particle2.gid=ID_vector.at(t);
-          particle2.fDecayLength=0;
-          BuildParticle(particle2,TrkClusterXYZf_NDGAr,GArCenter,geom);
-
-          particle2.reconstructParticleFull(geom,211,particle.fLayerIndex[0]);
-          particle2.reconstructParticleFullOut(geom,211,particle.fLayerIndex[0]);
-          particle2.refitParticle();
-
-          fastParticle particletot(hlf.size()+1);
-          particletot.fAddMSsmearing=true;
-          particletot.fAddPadsmearing=false;
-          particletot.fUseMCInfo=false;
-          particletot.fgStreamer=pcstream;
-          particletot.gid=ID_vector.at(t);
-          particletot.fDecayLength=0;
-          CombineParticle(particletot,particle,particle2);
-          particletot.refitParticle();
-          */
-
-          if (dumpStream==kFALSE) continue;
-          if (tree) tree->Fill();
-          else {
-            (*pcstream) << "fastPart" <<
-                        "i=" << i <<
-                        "TStQ=" << TStQ <<
-                        "TStX=" << TStX <<
-                        "TStY=" << TStY <<
-                        "TStZ=" << TStZ <<
-                        "TStPX=" << TStPX <<
-                        "TStPY=" << TStPY <<
-                        "TStPZ=" << TStPZ <<
-                        "TEndQ=" << TEndQ <<
-                        "TEndX=" << TEndX <<
-                        "TEndY=" << TEndY <<
-                        "TEndZ=" << TEndZ <<
-                        "TEndPX=" << TEndPX <<
-                        "TEndPY=" << TEndPY <<
-                        "TEndPZ=" << TEndPZ <<
-                        "geom.="<<&geom<<
-                        "part.=" << &particle <<
-                        //"part2.="<< &particle2 <<
-                        //"parttot.="<< &particle2 <<
-                        "\n";
-            tree=  ((*pcstream) << "fastPart").GetTree();
-          }       
+          }          
       }
       
   }
