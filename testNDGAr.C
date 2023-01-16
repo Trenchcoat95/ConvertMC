@@ -1,13 +1,4 @@
 /*
-    gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/aliKalman/test/\"")
-    gSystem->AddIncludePath("-I\"$ConvertMC/Local/\"")
-    gSystem->Load("$fastMCKalman/fastMCKalman/aliKalman/test/AliExternalTrackParam.so");
-    .L  Local/fastSimulation.cxx++g
-    .L testNDGAr.C++g
-    AliPDG::AddParticlesToPdgDataBase();
-    testNDGAr(300,kTRUE)
-
-    or
 
     gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/aliKalman/test/\"")
     gSystem->AddIncludePath("-I\"$fastMCKalman/fastMCKalman/MC/\"")
@@ -15,7 +6,7 @@
     .L $fastMCKalman/fastMCKalman/MC/fastSimulation.cxx++g
     .L $ConvertMC/testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
-    testNDGAr(300,kTRUE)
+    testNDGAr(300,kTRUE,kTRUE)
 
  */
 #include "fastSimulation.h"
@@ -62,72 +53,16 @@ size_t ClosestPoint(std::vector<TVector3> trajxyz, TVector3 ClusterXYZ)
   return index;
 }
 
-Int_t BuildParticle(fastParticle &particle, std::vector<TVector3> ClusterXYZ, double Center[3], fastGeometry geom, 
-                   std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode)
+void ClosestTrajectory(std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, std::vector<TVector3> ClusterXYZ, 
+                        std::vector<TVector3> &trajpxyz_closest)
 {
-          uint fMaxLayer = 0;
-          TParticlePDG *p = TDatabasePDG::Instance()->GetParticle(PDGcode);
-          if (p == nullptr) {
-            ::Error("fastParticle::simulateParticle", "Invalid pdgCode %ld", PDGcode);
-            return -1;
-          }
-          Short_t sign = p->Charge() / 3.;
-          Float_t mass = p->Mass();
-          particle.fMassMC=mass;
-
-          for(size_t k=0;k<ClusterXYZ.size();k++) 
-          {
-
-              Double_t xyz_conv[3]= {ClusterXYZ.at(k).Z()-Center[2],
-                                ClusterXYZ.at(k).Y()-Center[1],
-                                ClusterXYZ.at(k).X()-Center[0]};
-
-              size_t closest = ClosestPoint(trajxyz,ClusterXYZ.at(k));
-              Double_t pxyz_conv[3]= {trajpxyz.at(closest).Z(),
-                                      trajpxyz.at(closest).Y(),
-                                      trajpxyz.at(closest).X()};
-
-              Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
-              Double_t radius=sqrt(xyz_conv[1]*xyz_conv[1]+xyz_conv[0]*xyz_conv[0]);
-              Double_t X_loc =  xyz_conv[0]*cos(alpha) + xyz_conv[1]*sin(alpha);
-              Double_t Y_loc = -xyz_conv[0]*sin(alpha) + xyz_conv[1]*cos(alpha);
-              //Double_t param[5]={Y_loc,xyz_conv.Z(),0,0,0};              
-              //particle.fParamMC[k].SetParamOnly(X_loc,alpha,param);
-              double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-              AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
-              AliExternalTrackParam4D param4D(param,mass,1);
-              Bool_t status = param4D.Rotate(alpha);
-              if(!status)
-              {
-                continue;
-              }
-              particle.fDirection.resize(k+1);
-              particle.fParamMC.resize(k+1);
-              particle.fLayerIndex.resize(k+1);
-              particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
-              particle.fParamMC[k].Rotate(alpha);
-              //particle.fParamMC[k].Rotate(alpha);
-              uint indexR = uint(std::upper_bound (geom.fLayerRadius.begin(),geom.fLayerRadius.end(), radius)-geom.fLayerRadius.begin());
-              particle.fLayerIndex[k] = indexR;
-              if(k!=0)
-              {
-                TVector3 xyz_prev(ClusterXYZ.at(k-1).Z()-Center[2],
-                                  ClusterXYZ.at(k-1).Y()-Center[1],
-                                  ClusterXYZ.at(k-1).X()-Center[0]);
-                Double_t r_prev = sqrt(xyz_prev.Y()*xyz_prev.Y()+xyz_prev.X()*xyz_prev.X());
-                if((radius/r_prev)>1) particle.fDirection[k] = +1;
-                else particle.fDirection[k] = -1;
-              }
-              else particle.fDirection[k] = +1;
-
-              if (indexR>fMaxLayer) fMaxLayer=indexR;
-          }
-          if(particle.fDirection.size()>1) particle.fDirection[0]=particle.fDirection[1];
-
-          return 1;
+  for(size_t t=0;t<ClusterXYZ.size();t++)
+  {
+    trajpxyz_closest.push_back(trajpxyz[ClosestPoint(trajxyz,ClusterXYZ[t])]);
+  }
 }
 
-Int_t BuildParticleIdeal(fastParticle &particle, double Center[3], fastGeometry geom, 
+Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom, 
                    std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode)
 {
           uint fMaxLayer = 0;
@@ -238,7 +173,7 @@ void CombineParticle(fastParticle &particle, fastParticle part1, fastParticle pa
           for(size_t i=0; i<part2.fStatusMaskRefit.size(); i++) particle.fStatusMaskOut[i]=part2.fStatusMaskRefit[part2.fStatusMaskRefit.size()-1-i];
 }
 
-void testNDGAr(Int_t nEv, bool dumpStream=1){
+void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
 
   const Int_t   nLayerTPC=278;
   const Int_t   nPoints=nLayerTPC*3;
@@ -402,10 +337,11 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
 
       size_t ID = 0;
       size_t MCID = 0;
-      std::vector<std::vector<TVector3>> TrksXYZ;
-      std::vector<TVector3> TrkClusterXYZ;
-      std::vector<size_t> ID_vector;
-      std::vector<int> MCID_vector;
+      std::vector<size_t> ID_vector;                    ///////For Each event find all the reconstructed tracks and save their IDs
+      std::vector<int> MCID_vector;                     ///////For each track find the corresponding MC index to match information with MC truth
+      std::vector<std::vector<TVector3>> TrksXYZ;       ///////Vector containing one vector of TPCCluster XYZ points for each track
+      std::vector<TVector3> TrkClusterXYZ;              /////Container that will be filled for each track, added to TrksXYZ and then deleted
+                                                        /////Note: for now all is in ND-GAr coordinates
       for(UInt_t k=0; k<TrackIDNumber->size();k++)
       {
           ID = TrackIDNumber->at(k);
@@ -423,9 +359,10 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
 
 
       
-      for(size_t t=0; t<TrksXYZ.size(); t++)
+      for(size_t t=0; t<TrksXYZ.size(); t++)   ////Cycle over all the tracks for the event 
+                                               ////Note that in the final tree the separation between events is lost and each item is a track)
       {    
-          Double_t TStX = TrackStartZ->at(t)- GArCenter[2];
+          Double_t TStX = TrackStartZ->at(t)- GArCenter[2];         //////Save track's ND-GAr reconstructed quantities in the ALICE coordinate frame
           Double_t TStY = TrackStartY->at(t)- GArCenter[1];
           Double_t TStZ =  TrackStartX->at(t)- GArCenter[0];
           Double_t TStPX = TrackStartPZ->at(t);
@@ -439,9 +376,10 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
           Double_t TEndPY = TrackEndPY->at(t);
           Double_t TEndPZ =  TrackEndPX->at(t);
           int TEndQ = TrackEndQ->at(t);
-          std::vector<TVector3> trajxyz;
+
+          std::vector<TVector3> trajxyz;                ///////Find MC trajectory that produced the track and save  the xyz's and pxyz's
           std::vector<TVector3> trajpxyz;
-          for(size_t u=0; u<TrajMCPX->size(); u++)
+          for(size_t u=0; u<TrajMCPX->size(); u++)          
           {
             if(MCID_vector.at(t)==TrajMCPIndex->at(u))
             {
@@ -453,14 +391,16 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
             }
           }
 
-          if(trajxyz.size()==0) continue;
+          if(trajxyz.size()==0) continue;       /////Skip tracks that were not successfully associated to a MC trajectory by the back-tracker
 
           
-          long PDGcode=PDG->at(MCID_vector.at(t));
+          long PDGcode=PDG->at(MCID_vector.at(t));    ////Save PDGCode for the MC trajectory associated with the ND-GAr reconstructed track
 
-          if(PDGcode==0 || abs(PDGcode)==14 || abs(PDGcode)!=13) continue;
+          if(PDGcode==0 || abs(PDGcode)==14 || abs(PDGcode)!=13) continue;   ////For now only checking muons
           std::cout<<"ID: "<<ID_vector.at(t)<<" PDG: "<<PDGcode<<std::endl;
-          ///////////////////////////////////////////// Sort TPC Clusters
+
+
+          ///////////////////////////////////////////// Sort TPC Clusters using the ND-GAr method
           std::vector<int> hlf;
           std::vector<int> hlb;
           float lftmp=0;  
@@ -472,6 +412,13 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
           for(size_t k=0;k<hlb.size();k++) TrkClusterXYZb_NDGAr.push_back(TrksXYZ.at(t).at(hlb[k]));
           for(size_t k=0;k<hlf.size();k++) TrkClusterXYZf_NDGAr.push_back(TrksXYZ.at(t).at(hlf[k]));
 
+          ///Now that we have vectors of sorted TPCClusters we can find the closest trajectory point for each cluster 
+          ///and save the MC pxyz information for each point
+          std::vector<TVector3> trajpxyzb_NDGAr;
+          ClosestTrajectory(trajxyz,trajpxyz,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr);
+          std::vector<TVector3> trajpxyzf_NDGAr;
+          ClosestTrajectory(trajxyz,trajpxyz,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr);
+
           ////// Create particle object with ALICE-like global coordinates
           fastParticle particle(hlb.size()+1);
           particle.fAddMSsmearing=true;
@@ -480,12 +427,24 @@ void testNDGAr(Int_t nEv, bool dumpStream=1){
           particle.fgStreamer=pcstream;
           particle.gid=ID_vector.at(t);
           particle.fDecayLength=0;
-          //BuildParticle(particle,TrkClusterXYZb_NDGAr,GArCenter,geom,trajxyz,trajpxyz,PDGcode);
-          BuildParticleIdeal(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);
-          if(particle.fParamMC.size()==0) continue;
-          particle.reconstructParticleFull(geom,PDGcode,10000);
-          particle.reconstructParticleFullOut(geom,PDGcode,10000);
-          particle.refitParticle();
+        
+          if(Ideal) {
+            BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  //////Built the ALICE particle with the MC trajectory xyz and pxyz points 
+            if(particle.fParamMC.size()==0) continue;
+            particle.reconstructParticleFull(geom,PDGcode,10000);
+            particle.reconstructParticleFullOut(geom,PDGcode,10000);
+            particle.refitParticle();
+          }
+          else
+          {
+            BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  /////Build the ALICE particle with Track XYZClusters and closest MC pxyz
+            if(particle.fParamMC.size()==0) continue;
+            particle.reconstructParticleFull(geom,PDGcode,10000);
+            particle.reconstructParticleFullOut(geom,PDGcode,10000);
+            particle.refitParticle();
+          }
+
+
           /*
           fastParticle particle2(hlf.size()+1);
           particle2.fAddMSsmearing=true;
@@ -568,5 +527,9 @@ void initTreeFast(const char * inputList="fastParticle.list"){
   treeUnit0->SetAlias("dEdxIn","AliExternalTrackParam::BetheBlochSolid(paramIn.P()/mass+0)");
   treeUnit0->SetAlias("dEdxOut","AliExternalTrackParam::BetheBlochSolid(paramRK.P()/mass+0)");
 
-}
+  treeFast->SetAlias("ptMCSt","1./TMath::Abs(part.fParamMC[0].fP[4])");
+  treeFast->SetAlias("rMCSt","TMath::Sqrt((1. - part.fParamMC[0].fP[2])*(1. + part.fParamMC[0].fP[2]))");
+  treeFast->SetAlias("pxMCSt","ptMCSt*(rMCSt*TMath::Cos(part.fParamMC[0].fAlpha) - part.fParamMC[0].fP[2]*TMath::Sin(part.fParamMC[0].fAlpha))");
+  treeFast->SetAlias("pyMCSt","ptMCSt*(part.fParamMC[0].fP[2]*TMath::Cos(part.fParamMC[0].fAlpha) + rMCSt*TMath::Sin(part.fParamMC[0].fAlpha))");
 
+}
