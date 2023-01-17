@@ -156,23 +156,6 @@ Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom,
 }
 
 
-void CombineParticle(fastParticle &particle, fastParticle part1, fastParticle part2)
-{
-
-          particle.fParamMC.resize(part1.fParamMC.size());
-          particle.fParamMC = part1.fParamMC;
-
-          particle.fParamIn.resize(part1.fParamRefit.size());
-          particle.fParamIn = part1.fParamRefit;
-          particle.fStatusMaskIn.resize(part1.fStatusMaskRefit.size());
-          particle.fStatusMaskIn = part1.fStatusMaskRefit;
-
-          particle.fParamOut.resize(part2.fParamRefit.size());
-          for(size_t i=0; i<part2.fParamRefit.size(); i++) particle.fParamIn[i]=part2.fParamRefit[part2.fParamRefit.size()-1-i];
-          particle.fStatusMaskOut.resize(part2.fStatusMaskRefit.size());
-          for(size_t i=0; i<part2.fStatusMaskRefit.size(); i++) particle.fStatusMaskOut[i]=part2.fStatusMaskRefit[part2.fStatusMaskRefit.size()-1-i];
-}
-
 void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
 
   const Int_t   nLayerTPC=278;
@@ -192,7 +175,8 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
 
   //////////////////////////////////////////////////////////////////////////////////Create result File
   std::string filename = "FullReco";
-  std::string path ="/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/Reco";
+  if(Ideal) filename+= "Ideal";
+  std::string path ="/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/";
   std::string dirname = path+filename;
   std::string totalname = dirname +"/"+filename+".root";
   std::string filelist = dirname + "/fastParticle.list";
@@ -461,19 +445,65 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
           }
           else
           {
+
+            /////// Repeat reconstruction twice because of the energy loss reconstruction
             ////// Create particle object with ALICE-like global coordinates
-            fastParticle particle(hlf.size()+1);
-            particle.fAddMSsmearing=true;
-            particle.fAddPadsmearing=false;
-            particle.fUseMCInfo=false;
-            particle.fgStreamer=pcstream;
-            particle.gid=ID_vector.at(t);
-            particle.fDecayLength=0;
-            BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  /////Build the ALICE particle with Track XYZClusters and closest MC pxyz
-            if(particle.fParamMC.size()==0) continue;
-            particle.reconstructParticleFull(geom,PDGcode,10000);
-            particle.reconstructParticleFullOut(geom,PDGcode,10000);
-            particle.refitParticle();
+
+            std::cout<<"Forward ordering reconstruction"<<std::endl;
+            fastParticle particle_f(hlf.size()+1);
+            particle_f.fAddMSsmearing=true;
+            particle_f.fAddPadsmearing=false;
+            particle_f.fUseMCInfo=false;
+            particle_f.fgStreamer=pcstream;
+            particle_f.gid=ID_vector.at(t);
+            particle_f.fDecayLength=0;
+            BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
+            if(particle_f.fParamMC.size()==0) continue;
+            particle_f.reconstructParticleFull(geom,PDGcode,10000);
+            particle_f.reconstructParticleFullOut(geom,PDGcode,10000);
+            particle_f.refitParticle();
+
+            ////// Create particle object with ALICE-like global coordinates
+
+            std::cout<<"Backward ordering reconstruction"<<std::endl;
+            fastParticle particle_b(hlb.size()+1);
+            particle_b.fAddMSsmearing=true;
+            particle_b.fAddPadsmearing=false;
+            particle_b.fUseMCInfo=false;
+            particle_b.fgStreamer=pcstream;
+            particle_b.gid=ID_vector.at(t);
+            particle_b.fDecayLength=0;
+            BuildParticle(particle_b,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered backwards and closest MC pxyz
+            if(particle_b.fParamMC.size()==0) continue;
+            particle_b.reconstructParticleFull(geom,PDGcode,10000);
+            particle_b.reconstructParticleFullOut(geom,PDGcode,10000);
+            particle_b.refitParticle();
+
+                        if (dumpStream==kFALSE) continue;
+            if (tree) tree->Fill();
+            else {
+              (*pcstream) << "fastPart" <<
+                          "i=" << i <<
+                          "TStQ=" << TStQ <<
+                          "TStX=" << TStX <<
+                          "TStY=" << TStY <<
+                          "TStZ=" << TStZ <<
+                          "TStPX=" << TStPX <<
+                          "TStPY=" << TStPY <<
+                          "TStPZ=" << TStPZ <<
+                          "TEndQ=" << TEndQ <<
+                          "TEndX=" << TEndX <<
+                          "TEndY=" << TEndY <<
+                          "TEndZ=" << TEndZ <<
+                          "TEndPX=" << TEndPX <<
+                          "TEndPY=" << TEndPY <<
+                          "TEndPZ=" << TEndPZ <<
+                          "geom.="<<&geom<<
+                          "part.=" << &particle_f <<
+                          "partb.=" << &particle_b <<
+                          "\n";
+              tree=  ((*pcstream) << "fastPart").GetTree();
+            }
           }          
       }
       
