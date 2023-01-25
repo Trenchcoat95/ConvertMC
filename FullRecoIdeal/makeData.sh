@@ -7,5 +7,5 @@
     .L /home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
     AliLog::SetPrintRepetitions(0);
-    testNDGAr(40000,kTRUE,kFALSE);            //setup for the looper development
+    testNDGAr(40000,kTRUE,kTRUE);            //setup for the looper development
     .q

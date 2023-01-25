@@ -25,7 +25,7 @@ makeData(){
     .L $ConvertMC/testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
     AliLog::SetPrintRepetitions(0);
-    testNDGAr(${nPoints},kTRUE);            //setup for the looper development
+    testNDGAr(${nPoints},kTRUE,kFALSE);            //setup for the looper development
     .q
 EOF
    chmod a+x makeData.sh

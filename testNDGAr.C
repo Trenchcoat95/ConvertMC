@@ -6,7 +6,7 @@
     .L $fastMCKalman/fastMCKalman/MC/fastSimulation.cxx++g
     .L $ConvertMC/testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
-    testNDGAr(300,kTRUE,kTRUE)
+    testNDGAr(300,kTRUE,kFALSE)
 
  */
 #include "fastSimulation.h"
@@ -54,12 +54,17 @@ size_t ClosestPoint(std::vector<TVector3> trajxyz, TVector3 ClusterXYZ)
 }
 
 void ClosestTrajectory(std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, std::vector<TVector3> ClusterXYZ, 
-                        std::vector<TVector3> &trajpxyz_closest)
+                        std::vector<TVector3> &trajpxyz_closest,Bool_t &IsForward)
 {
+  size_t FirstTrajIndex,LastTrajIndex;
   for(size_t t=0;t<ClusterXYZ.size();t++)
   {
     trajpxyz_closest.push_back(trajpxyz[ClosestPoint(trajxyz,ClusterXYZ[t])]);
+    if(t==0) FirstTrajIndex=ClosestPoint(trajxyz,ClusterXYZ[t]);
+    if(t==(ClusterXYZ.size()-1)) LastTrajIndex=ClosestPoint(trajxyz,ClusterXYZ[t]);
   }
+  if(LastTrajIndex>FirstTrajIndex) IsForward=kTRUE;
+  else IsForward=kFALSE;
 }
 
 Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom, 
@@ -156,13 +161,81 @@ Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom,
 }
 
 
-void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
+Int_t BuildParamNDGArReco(AliExternalTrackParam4D &paramNDGAr4D, double Center[3], 
+                          TVector3 trajxyz, TVector3 trajpxyz, long PDGcode,
+                          Short_t signr=0)
+{
+        TParticlePDG *p = TDatabasePDG::Instance()->GetParticle(PDGcode);
+        if (p == nullptr) {
+          ::Error("fastParticle::simulateParticle", "Invalid pdgCode %ld", PDGcode);
+          return -1;
+        }
+        Float_t mass = p->Mass();
+        Short_t sign;
+        if(signr==0) sign = 1 * p->Charge() / 3.;
+        else sign=signr;
+
+        Bool_t invert = kFALSE;
+        Double_t xyz_conv[3]= {(trajxyz.Z()-Center[2]),
+                          trajxyz.Y()-Center[1],
+                          trajxyz.X()-Center[0]};
+
+        Double_t pxyz_conv[3]= {(trajpxyz.Z()),
+                                  trajpxyz.Y(),
+                                  trajpxyz.X()};
+
+        Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
+        Double_t radius=sqrt(xyz_conv[1]*xyz_conv[1]+xyz_conv[0]*xyz_conv[0]);
+        Double_t X_loc =  xyz_conv[0]*cos(alpha) + xyz_conv[1]*sin(alpha);
+        Double_t Y_loc = -xyz_conv[0]*sin(alpha) + xyz_conv[1]*cos(alpha);
+
+        double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+        AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
+        AliExternalTrackParam4D param4D(param,mass,1);
+        Double_t pxyz_conv_test[3];
+        param4D.GetPxPyPz(pxyz_conv_test);
+        Bool_t status = param4D.Rotate(alpha);
+        Double_t pxyz_inv[3] = {-pxyz_conv[0],-pxyz_conv[1],-pxyz_conv[2]};
+
+        if((abs(pxyz_conv_test[0]-pxyz_conv[0])>0.00001) || (!status))
+        {
+          AliExternalTrackParam param_inv(xyz_conv,pxyz_inv,covar,sign);
+          AliExternalTrackParam4D param4D_inv(param_inv,mass,1);
+          status = param4D_inv.Rotate(alpha);
+          invert=kTRUE;
+        }
+
+        if(status)
+        {
+          if(!invert)
+          {
+            paramNDGAr4D.Set(xyz_conv,pxyz_conv,covar,sign);
+            paramNDGAr4D.Rotate(alpha);
+          }
+          else
+          {
+            paramNDGAr4D.Set(xyz_conv,pxyz_inv,covar,-sign);
+            paramNDGAr4D.Rotate(alpha);
+          }
+        }
+        else
+        {
+          double ptemp[] = {Y_loc,xyz_conv[2],0,0,0};
+          paramNDGAr4D.SetParamOnly(X_loc,alpha,ptemp);
+        }
+
+
+    return 1;
+}
+
+
+void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent=0){
 
   const Int_t   nLayerTPC=278;
   const Int_t   nPoints=nLayerTPC*3;
   const Float_t xx0=8.37758e-04; //1/X0 cm^-1 for ArCH4 at 10 atm
   const Float_t xrho=0.016770000; //rho g/cm^3 for ArCH4 at 10 atm
-  const Float_t kMaterialScaling=1;      ////Promote to global variable
+  const Float_t kMaterialScaling=0.5;      ////Promote to global variable
   double GArCenter[3]={0,-150.473,1486}; 
   float fSortDistCut = 10.0;
   float fPrintLevel = 0.0;
@@ -192,7 +265,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
 
   /////////////////////////////////////////////////////////////////////////////////Read and set the tree source
   TChain* tree_source = new TChain("/anatree/GArAnaTree");    
-  tree_source->Add("/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/MC/*");
+  tree_source->Add("/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/MC/anatree*");
   std::vector<size_t>  *TPCClusterTrkIDNumber = 0;
   std::vector<int>  *TPCClusterMCindex = 0;
   std::vector<size_t>  *TrackIDNumber = 0;
@@ -311,7 +384,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
   ////////////////////////////////////////////////////////////////////////////////Create and reconstruct Particle
   TTreeSRedirector *pcstream = new TTreeSRedirector(ctotal,"recreate");
   TTree * tree = 0;
-  for (Int_t i=0; i<nEv; i++){
+  for (Int_t i=FirstEvent; i<nEv; i++){
  
       tree_source->GetEntry(i);
       if(TrackIDNumber->size()==0) continue;
@@ -346,22 +419,25 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
       for(size_t t=0; t<TrksXYZ.size(); t++)   ////Cycle over all the tracks for the event 
                                                ////Note that in the final tree the separation between events is lost and each item is a track)
       {    
-          Double_t TStX = TrackStartZ->at(t)- GArCenter[2];         //////Save track's ND-GAr reconstructed quantities in the ALICE coordinate frame
-          Double_t TStY = TrackStartY->at(t)- GArCenter[1];
-          Double_t TStZ =  TrackStartX->at(t)- GArCenter[0];
-          Double_t TStPX = TrackStartPZ->at(t);
-          Double_t TStPY = TrackStartPY->at(t);
-          Double_t TStPZ =  TrackStartPX->at(t);
-          int TStQ = TrackStartQ->at(t);
-          Double_t TEndX = TrackEndZ->at(t)- GArCenter[2];
-          Double_t TEndY = TrackEndY->at(t)- GArCenter[1];
-          Double_t TEndZ =  TrackEndX->at(t)- GArCenter[0];
-          Double_t TEndPX = TrackEndPZ->at(t);
-          Double_t TEndPY = TrackEndPY->at(t);
-          Double_t TEndPZ =  TrackEndPX->at(t);
-          int TEndQ = TrackEndQ->at(t);
+          // Double_t TStX = TrackStartZ->at(t)- GArCenter[2];         //////Save track's ND-GAr reconstructed quantities in the ALICE coordinate frame
+          // Double_t TStY = TrackStartY->at(t)- GArCenter[1];
+          // Double_t TStZ =  TrackStartX->at(t)- GArCenter[0];
+          // Double_t TStPX = TrackStartPZ->at(t);
+          // Double_t TStPY = TrackStartPY->at(t);
+          // Double_t TStPZ =  TrackStartPX->at(t);
+          // int TStQ = TrackStartQ->at(t);
+          // Double_t TEndX = TrackEndZ->at(t)- GArCenter[2];
+          // Double_t TEndY = TrackEndY->at(t)- GArCenter[1];
+          // Double_t TEndZ =  TrackEndX->at(t)- GArCenter[0];
+          // Double_t TEndPX = TrackEndPZ->at(t);
+          // Double_t TEndPY = TrackEndPY->at(t);
+          // Double_t TEndPZ =  TrackEndPX->at(t);
+          // int TEndQ = TrackEndQ->at(t);
 
-          std::vector<TVector3> trajxyz;                ///////Find MC trajectory that produced the track and save  the xyz's and pxyz's
+
+
+          ///////Find MC trajectory that produced the track and save  the xyz's and pxyz's
+          std::vector<TVector3> trajxyz;                
           std::vector<TVector3> trajpxyz;
           for(size_t u=0; u<TrajMCPX->size(); u++)          
           {
@@ -380,8 +456,10 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
           
           long PDGcode=PDG->at(MCID_vector.at(t));    ////Save PDGCode for the MC trajectory associated with the ND-GAr reconstructed track
 
-          if(PDGcode==0 || abs(PDGcode)==14 || abs(PDGcode)!=13) continue;   ////For now only checking muons
-          std::cout<<"ID: "<<ID_vector.at(t)<<" PDG: "<<PDGcode<<std::endl;
+          if(PDGcode==0 || abs(PDGcode)==14 || abs(PDGcode)!=13 ) continue;   ////For now only checking muons 
+          std::cout<<"ID: "<<ID_vector.at(t)<<" PDG: "<<PDGcode<<" ev: "<< i <<std::endl;
+
+
 
 
           ///////////////////////////////////////////// Sort TPC Clusters using the ND-GAr method
@@ -398,10 +476,41 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
 
           ///Now that we have vectors of sorted TPCClusters we can find the closest trajectory point for each cluster 
           ///and save the MC pxyz information for each point
+          Bool_t IsForwardf, isForwardb;
           std::vector<TVector3> trajpxyzb_NDGAr;
-          ClosestTrajectory(trajxyz,trajpxyz,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr);
+          ClosestTrajectory(trajxyz,trajpxyz,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,isForwardb);
           std::vector<TVector3> trajpxyzf_NDGAr;
-          ClosestTrajectory(trajxyz,trajpxyz,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr);
+          ClosestTrajectory(trajxyz,trajpxyz,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,IsForwardf);
+
+          ////Build end and start NDGAr reco parameters to be saved 
+          ///Start of the track
+          AliExternalTrackParam4D paramSt0;
+          TVector3 xyzSt(TrackStartX->at(t),TrackStartY->at(t),TrackStartZ->at(t));
+          TVector3 pxyzSt(TrackStartPX->at(t),TrackStartPY->at(t),TrackStartPZ->at(t));
+          int qSt = TrackStartQ->at(t);
+          BuildParamNDGArReco(paramSt0,GArCenter,xyzSt,pxyzSt,PDGcode,qSt);
+
+
+          ///End of the track
+          AliExternalTrackParam4D paramEnd0;
+          TVector3 xyzEnd(TrackEndX->at(t),TrackEndY->at(t),TrackEndZ->at(t));
+          TVector3 pxyzEnd(TrackEndPX->at(t),TrackEndPY->at(t),TrackEndPZ->at(t));
+          int qEnd = TrackEndQ->at(t);
+          BuildParamNDGArReco(paramEnd0,GArCenter,xyzEnd,pxyzEnd,PDGcode,qEnd);
+
+          AliExternalTrackParam4D paramSt;
+          AliExternalTrackParam4D paramEnd;
+
+          if(IsForwardf)
+          {
+            paramSt = paramSt0;
+            paramEnd = paramEnd0;
+          }
+          else
+          {
+            paramSt = paramEnd0;
+            paramEnd = paramSt0;
+          }
 
         
           if(Ideal) {
@@ -423,20 +532,25 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
             else {
               (*pcstream) << "fastPart" <<
                           "i=" << i <<
-                          "TStQ=" << TStQ <<
-                          "TStX=" << TStX <<
-                          "TStY=" << TStY <<
-                          "TStZ=" << TStZ <<
-                          "TStPX=" << TStPX <<
-                          "TStPY=" << TStPY <<
-                          "TStPZ=" << TStPZ <<
-                          "TEndQ=" << TEndQ <<
-                          "TEndX=" << TEndX <<
-                          "TEndY=" << TEndY <<
-                          "TEndZ=" << TEndZ <<
-                          "TEndPX=" << TEndPX <<
-                          "TEndPY=" << TEndPY <<
-                          "TEndPZ=" << TEndPZ <<
+                          "t=" <<t<<
+                          // "TStQ=" << TStQ <<
+                          // "TStX=" << TStX <<
+                          // "TStY=" << TStY <<
+                          // "TStZ=" << TStZ <<
+                          // "TStPX=" << TStPX <<
+                          // "TStPY=" << TStPY <<
+                          // "TStPZ=" << TStPZ <<
+                          // "TEndQ=" << TEndQ <<
+                          // "TEndX=" << TEndX <<
+                          // "TEndY=" << TEndY <<
+                          // "TEndZ=" << TEndZ <<
+                          // "TEndPX=" << TEndPX <<
+                          // "TEndPY=" << TEndPY <<
+                          // "TEndPZ=" << TEndPZ <<
+                          // "paramStMC.="<<&paramStMC<<
+                          // "paramEndMC.="<<&paramEndMC<<
+                          "paramSt.="<<&paramSt<<
+                          "paramEnd.="<<&paramEnd<<
                           "geom.="<<&geom<<
                           "part.=" << &particle <<
                           "\n";
@@ -449,7 +563,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
             /////// Repeat reconstruction twice because of the energy loss reconstruction
             ////// Create particle object with ALICE-like global coordinates
 
-            std::cout<<"Forward ordering reconstruction"<<std::endl;
+            //std::cout<<"Forward ordering reconstruction"<<std::endl;
             fastParticle particle_f(hlf.size()+1);
             particle_f.fAddMSsmearing=true;
             particle_f.fAddPadsmearing=false;
@@ -457,50 +571,63 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE){
             particle_f.fgStreamer=pcstream;
             particle_f.gid=ID_vector.at(t);
             particle_f.fDecayLength=0;
-            BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
-            if(particle_f.fParamMC.size()==0) continue;
+            if(IsForwardf){
+              std::cout<<"Forward"<<std::endl;
+              BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
+              if(particle_f.fParamMC.size()==0) continue;
+            }
+            else{
+              std::cout<<"Backwards"<<std::endl;
+              BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
+              if(particle_f.fParamMC.size()==0) continue;
+            }
             particle_f.reconstructParticleFull(geom,PDGcode,10000);
             particle_f.reconstructParticleFullOut(geom,PDGcode,10000);
             particle_f.refitParticle();
 
             ////// Create particle object with ALICE-like global coordinates
 
-            std::cout<<"Backward ordering reconstruction"<<std::endl;
-            fastParticle particle_b(hlb.size()+1);
-            particle_b.fAddMSsmearing=true;
-            particle_b.fAddPadsmearing=false;
-            particle_b.fUseMCInfo=false;
-            particle_b.fgStreamer=pcstream;
-            particle_b.gid=ID_vector.at(t);
-            particle_b.fDecayLength=0;
-            BuildParticle(particle_b,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered backwards and closest MC pxyz
-            if(particle_b.fParamMC.size()==0) continue;
-            particle_b.reconstructParticleFull(geom,PDGcode,10000);
-            particle_b.reconstructParticleFullOut(geom,PDGcode,10000);
-            particle_b.refitParticle();
+            // std::cout<<"Backward ordering reconstruction"<<std::endl;
+            // fastParticle particle_b(hlb.size()+1);
+            // particle_b.fAddMSsmearing=true;
+            // particle_b.fAddPadsmearing=false;
+            // particle_b.fUseMCInfo=false;
+            // particle_b.fgStreamer=pcstream;
+            // particle_b.gid=ID_vector.at(t);
+            // particle_b.fDecayLength=0;
+            // BuildParticle(particle_b,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered backwards and closest MC pxyz
+            // if(particle_b.fParamMC.size()==0) continue;
+            // particle_b.reconstructParticleFull(geom,PDGcode,10000);
+            // particle_b.reconstructParticleFullOut(geom,PDGcode,10000);
+            // particle_b.refitParticle();
 
                         if (dumpStream==kFALSE) continue;
             if (tree) tree->Fill();
             else {
               (*pcstream) << "fastPart" <<
                           "i=" << i <<
-                          "TStQ=" << TStQ <<
-                          "TStX=" << TStX <<
-                          "TStY=" << TStY <<
-                          "TStZ=" << TStZ <<
-                          "TStPX=" << TStPX <<
-                          "TStPY=" << TStPY <<
-                          "TStPZ=" << TStPZ <<
-                          "TEndQ=" << TEndQ <<
-                          "TEndX=" << TEndX <<
-                          "TEndY=" << TEndY <<
-                          "TEndZ=" << TEndZ <<
-                          "TEndPX=" << TEndPX <<
-                          "TEndPY=" << TEndPY <<
-                          "TEndPZ=" << TEndPZ <<
+                          "t=" <<t<<
+                          // "TStQ=" << TStQ <<
+                          // "TStX=" << TStX <<
+                          // "TStY=" << TStY <<
+                          // "TStZ=" << TStZ <<
+                          // "TStPX=" << TStPX <<
+                          // "TStPY=" << TStPY <<
+                          // "TStPZ=" << TStPZ <<
+                          // "TEndQ=" << TEndQ <<
+                          // "TEndX=" << TEndX <<
+                          // "TEndY=" << TEndY <<
+                          // "TEndZ=" << TEndZ <<
+                          // "TEndPX=" << TEndPX <<
+                          // "TEndPY=" << TEndPY <<
+                          // "TEndPZ=" << TEndPZ <<
+                          "paramSt.="<<&paramSt<<
+                          "paramEnd.="<<&paramEnd<<
+                          // "paramStMC.="<<&paramStMC<<
+                          // "paramEndMC.="<<&paramEndMC<<
                           "geom.="<<&geom<<
                           "part.=" << &particle_f <<
-                          "partb.=" << &particle_b <<
+                          // "partb.=" << &particle_b <<
                           "\n";
               tree=  ((*pcstream) << "fastPart").GetTree();
             }
