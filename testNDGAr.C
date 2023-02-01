@@ -10,6 +10,7 @@
 
  */
 #include "fastSimulation.h"
+#include "fastTrackerGAR.h"
 #include "TTreeStream.h"
 #include "TStopwatch.h"
 #include "TRandom.h"
@@ -419,20 +420,6 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
       for(size_t t=0; t<TrksXYZ.size(); t++)   ////Cycle over all the tracks for the event 
                                                ////Note that in the final tree the separation between events is lost and each item is a track)
       {    
-          // Double_t TStX = TrackStartZ->at(t)- GArCenter[2];         //////Save track's ND-GAr reconstructed quantities in the ALICE coordinate frame
-          // Double_t TStY = TrackStartY->at(t)- GArCenter[1];
-          // Double_t TStZ =  TrackStartX->at(t)- GArCenter[0];
-          // Double_t TStPX = TrackStartPZ->at(t);
-          // Double_t TStPY = TrackStartPY->at(t);
-          // Double_t TStPZ =  TrackStartPX->at(t);
-          // int TStQ = TrackStartQ->at(t);
-          // Double_t TEndX = TrackEndZ->at(t)- GArCenter[2];
-          // Double_t TEndY = TrackEndY->at(t)- GArCenter[1];
-          // Double_t TEndZ =  TrackEndX->at(t)- GArCenter[0];
-          // Double_t TEndPX = TrackEndPZ->at(t);
-          // Double_t TEndPY = TrackEndPY->at(t);
-          // Double_t TEndPZ =  TrackEndPX->at(t);
-          // int TEndQ = TrackEndQ->at(t);
 
 
 
@@ -524,6 +511,26 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
             particle.fDecayLength=0;
             BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  //////Built the ALICE particle with the MC trajectory xyz and pxyz points 
             if(particle.fParamMC.size()==0) continue;
+
+            ///Testing new seeding method
+            std::vector<TVector3> conv_points;
+            Double_t alphast = TMath::ATan2((trajxyz.at(1).Y()-GArCenter[1]),(trajxyz.at(1).Z()-GArCenter[2]));
+            if      (alphast < -TMath::Pi()) alphast += 2*TMath::Pi();
+            else if (alphast >= TMath::Pi()) alphast -= 2*TMath::Pi();
+
+            for(size_t o = 1; o<trajxyz.size(); o++) 
+            {
+              Double_t x0 =  trajxyz.at(o).Z()-GArCenter[2];
+              Double_t y0 =  trajxyz.at(o).Y()-GArCenter[1];
+              TVector3 tr(trajxyz.at(o).X()-GArCenter[0], //z
+                        -x0*sin(alphast) + y0*cos(alphast),   //y
+                        x0*cos(alphast) + y0*sin(alphast));  //x
+              conv_points.push_back(tr);
+            }
+            std::cout<<"conv_points: "<<conv_points.at(0).X()<<" "<<conv_points.at(0).Y()<<" "<<conv_points.at(0).Z()<<std::endl;
+            std::cout<<"traj: "<<trajxyz.at(0).X()<<" "<<trajxyz.at(0).Y()<<" "<<trajxyz.at(0).Z()<<std::endl;
+            AliExternalTrackParam * partest = fastTrackerGAR::Helix_Fit(conv_points,geom.fBz,0);
+
             particle.reconstructParticleFull(geom,PDGcode,10000);
             particle.reconstructParticleFullOut(geom,PDGcode,10000);
             particle.refitParticle();
@@ -533,22 +540,6 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
               (*pcstream) << "fastPart" <<
                           "i=" << i <<
                           "t=" <<t<<
-                          // "TStQ=" << TStQ <<
-                          // "TStX=" << TStX <<
-                          // "TStY=" << TStY <<
-                          // "TStZ=" << TStZ <<
-                          // "TStPX=" << TStPX <<
-                          // "TStPY=" << TStPY <<
-                          // "TStPZ=" << TStPZ <<
-                          // "TEndQ=" << TEndQ <<
-                          // "TEndX=" << TEndX <<
-                          // "TEndY=" << TEndY <<
-                          // "TEndZ=" << TEndZ <<
-                          // "TEndPX=" << TEndPX <<
-                          // "TEndPY=" << TEndPY <<
-                          // "TEndPZ=" << TEndPZ <<
-                          // "paramStMC.="<<&paramStMC<<
-                          // "paramEndMC.="<<&paramEndMC<<
                           "paramSt.="<<&paramSt<<
                           "paramEnd.="<<&paramEnd<<
                           "geom.="<<&geom<<
@@ -587,47 +578,17 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
 
             ////// Create particle object with ALICE-like global coordinates
 
-            // std::cout<<"Backward ordering reconstruction"<<std::endl;
-            // fastParticle particle_b(hlb.size()+1);
-            // particle_b.fAddMSsmearing=true;
-            // particle_b.fAddPadsmearing=false;
-            // particle_b.fUseMCInfo=false;
-            // particle_b.fgStreamer=pcstream;
-            // particle_b.gid=ID_vector.at(t);
-            // particle_b.fDecayLength=0;
-            // BuildParticle(particle_b,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered backwards and closest MC pxyz
-            // if(particle_b.fParamMC.size()==0) continue;
-            // particle_b.reconstructParticleFull(geom,PDGcode,10000);
-            // particle_b.reconstructParticleFullOut(geom,PDGcode,10000);
-            // particle_b.refitParticle();
 
-                        if (dumpStream==kFALSE) continue;
+            if (dumpStream==kFALSE) continue;
             if (tree) tree->Fill();
             else {
               (*pcstream) << "fastPart" <<
                           "i=" << i <<
                           "t=" <<t<<
-                          // "TStQ=" << TStQ <<
-                          // "TStX=" << TStX <<
-                          // "TStY=" << TStY <<
-                          // "TStZ=" << TStZ <<
-                          // "TStPX=" << TStPX <<
-                          // "TStPY=" << TStPY <<
-                          // "TStPZ=" << TStPZ <<
-                          // "TEndQ=" << TEndQ <<
-                          // "TEndX=" << TEndX <<
-                          // "TEndY=" << TEndY <<
-                          // "TEndZ=" << TEndZ <<
-                          // "TEndPX=" << TEndPX <<
-                          // "TEndPY=" << TEndPY <<
-                          // "TEndPZ=" << TEndPZ <<
                           "paramSt.="<<&paramSt<<
                           "paramEnd.="<<&paramEnd<<
-                          // "paramStMC.="<<&paramStMC<<
-                          // "paramEndMC.="<<&paramEndMC<<
                           "geom.="<<&geom<<
                           "part.=" << &particle_f <<
-                          // "partb.=" << &particle_b <<
                           "\n";
               tree=  ((*pcstream) << "fastPart").GetTree();
             }
