@@ -512,13 +512,18 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
             BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  //////Built the ALICE particle with the MC trajectory xyz and pxyz points 
             if(particle.fParamMC.size()==0) continue;
 
+            particle.reconstructParticleFull(geom,PDGcode,10000);
+            particle.reconstructParticleFullOut(geom,PDGcode,10000);
+            particle.refitParticle();
+
             ///Testing new seeding method
             std::vector<TVector3> conv_points;
-            Double_t alphast = TMath::ATan2((trajxyz.at(1).Y()-GArCenter[1]),(trajxyz.at(1).Z()-GArCenter[2]));
+            Double_t alphast = TMath::ATan2((trajxyz.at(particle.fFirstIndexOut+1).Y()-GArCenter[1]),(trajxyz.at(particle.fFirstIndexOut+1).Z()-GArCenter[2]));
             if      (alphast < -TMath::Pi()) alphast += 2*TMath::Pi();
             else if (alphast >= TMath::Pi()) alphast -= 2*TMath::Pi();
 
-            for(size_t o = 1; o<trajxyz.size(); o++) 
+
+            for(size_t o = particle.fFirstIndexOut+1; o<trajxyz.size(); o++) 
             {
               Double_t x0 =  trajxyz.at(o).Z()-GArCenter[2];
               Double_t y0 =  trajxyz.at(o).Y()-GArCenter[1];
@@ -526,20 +531,96 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
                         -x0*sin(alphast) + y0*cos(alphast),   //y
                         x0*cos(alphast) + y0*sin(alphast));  //x
               conv_points.push_back(tr);
+              
             }
-            std::cout<<"conv_points: "<<conv_points.at(0).X()<<" "<<conv_points.at(0).Y()<<" "<<conv_points.at(0).Z()<<std::endl;
-            std::cout<<"traj: "<<trajxyz.at(0).X()<<" "<<trajxyz.at(0).Y()<<" "<<trajxyz.at(0).Z()<<std::endl;
-            AliExternalTrackParam * partest = fastTrackerGAR::Helix_Fit(conv_points,geom.fBz,0);
+            Double_t crosslength=0;
+            for(size_t o=1; o<conv_points.size(); o++) crosslength+=sqrt(pow(conv_points[o].X()-conv_points[o-1].X(),2)+pow(conv_points[o].Y()-conv_points[o-1].Y(),2)+pow(conv_points[o].Z()-conv_points[o-1].Z(),2));
 
-            particle.reconstructParticleFull(geom,PDGcode,10000);
-            particle.reconstructParticleFullOut(geom,PDGcode,10000);
-            particle.refitParticle();
+            //std::cout<<"conv_points: "<<conv_points.at(0).X()<<" "<<conv_points.at(0).Y()<<" "<<conv_points.at(0).Z()<<std::endl;
+            //std::cout<<"traj: "<<trajxyz.at(1).X()<<" "<<trajxyz.at(1).Y()<<" "<<trajxyz.at(1).Z()<<std::endl;
+            AliExternalTrackParam * partest = fastTrackerGAR::Helix_Fit(conv_points,geom.fBz,resol[0],resol[1],1,0);
+            
+            Double_t c[15] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+            fastTrackerGAR::CalculateCovariance(c,conv_points,partest,geom.fBz,resol[0],resol[1],1,0);
+
+            AliExternalTrackParam   paramRot(partest->GetX(),alphast, partest->GetParameter(),c);
+           
+            AliExternalTrackParam4D paramGAr(paramRot,particle.fMassMC,1);
+
+            for (Int_t ic=0;ic<10; ic++) {
+               Bool_t status = paramGAr.CorrectForMeanMaterial(crosslength * kMaterialScaling* xx0/10., crosslength * kMaterialScaling* xrho/10., particle.fMassMC, 0.01);
+                int i = 0;
+            }
+            
+            Int_t sign0= trajxyz.at(1).Z()>trajxyz.at(2).Z()? 1.:-1.;
+            if (sign0<0) {
+              ((double*)paramGAr.GetParameter())[4]*=-1;
+              ((double*)paramGAr.GetParameter())[3]*=-1;
+              ((double*)paramGAr.GetParameter())[2]*=-1;
+              
+              ////Rotate Covariance accordingly RCR^T
+              ((double*)paramGAr.GetCovariance())[3]*=-1;
+              ((double*)paramGAr.GetCovariance())[4]*=-1;
+              ((double*)paramGAr.GetCovariance())[6]*=-1;
+              ((double*)paramGAr.GetCovariance())[7]*=-1;
+              ((double*)paramGAr.GetCovariance())[10]*=-1;
+              ((double*)paramGAr.GetCovariance())[11]*=-1;
+            }
+
+
+            std::vector<TVector3> conv_points_bkw;
+            Double_t alphaend = TMath::ATan2((trajxyz.at(particle.fFirstIndexIn-1).Y()-GArCenter[1]),(trajxyz.at(particle.fFirstIndexIn-1).Z()-GArCenter[2]));
+            if      (alphaend < -TMath::Pi()) alphaend += 2*TMath::Pi();
+            else if (alphaend >= TMath::Pi()) alphaend -= 2*TMath::Pi();
+
+            
+            
+            for(int o = int(particle.fFirstIndexIn-1); o>=0; o--) 
+            {
+              Double_t x0 =  trajxyz.at(o).Z()-GArCenter[2];
+              Double_t y0 =  trajxyz.at(o).Y()-GArCenter[1];
+              TVector3 tr(trajxyz.at(o).X()-GArCenter[0], //z
+                        -x0*sin(alphaend) + y0*cos(alphaend),   //y
+                        x0*cos(alphaend) + y0*sin(alphaend));  //x
+              conv_points_bkw.push_back(tr);
+              
+            }
+            Double_t crosslengthbkw=0;
+            for(size_t o=1; o<conv_points_bkw.size(); o++) crosslengthbkw+=sqrt(pow(conv_points_bkw[o].X()-conv_points_bkw[o-1].X(),2)+pow(conv_points_bkw[o].Y()-conv_points_bkw[o-1].Y(),2)+pow(conv_points_bkw[o].Z()-conv_points_bkw[o-1].Z(),2));
+            //std::cout<<"conv_points: "<<conv_points.at(0).X()<<" "<<conv_points.at(0).Y()<<" "<<conv_points.at(0).Z()<<std::endl;
+            //std::cout<<"traj: "<<trajxyz.at(1).X()<<" "<<trajxyz.at(1).Y()<<" "<<trajxyz.at(1).Z()<<std::endl;
+            AliExternalTrackParam * partestbkw = fastTrackerGAR::Helix_Fit(conv_points_bkw,geom.fBz,resol[0],resol[1],-1,0);
+            Double_t c_bkw[15] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+            fastTrackerGAR::CalculateCovariance(c_bkw,conv_points_bkw,partestbkw,geom.fBz,resol[0],resol[1],-1,0);
+            AliExternalTrackParam   paramRotbkw(partestbkw->GetX(),alphaend, partestbkw->GetParameter(),c_bkw);
+            AliExternalTrackParam4D paramGArbkw(paramRotbkw,particle.fMassMC,1);
+            for (Int_t ic=0;ic<10; ic++) {
+               Bool_t status = paramGArbkw.CorrectForMeanMaterial(crosslengthbkw * kMaterialScaling* xx0/10., -crosslengthbkw * kMaterialScaling* xrho/10., particle.fMassMC, 0.01);
+            }
+            sign0= conv_points_bkw.at(1).Z()<conv_points_bkw.at(2).Z()? 1.:-1.;
+            if (sign0<0) {
+              ((double*)paramGArbkw.GetParameter())[4]*=-1;
+              ((double*)paramGArbkw.GetParameter())[3]*=-1;
+              ((double*)paramGArbkw.GetParameter())[2]*=-1;
+              
+              ////Rotate Covariance accordingly RCR^T
+              ((double*)paramGArbkw.GetCovariance())[3]*=-1;
+              ((double*)paramGArbkw.GetCovariance())[4]*=-1;
+              ((double*)paramGArbkw.GetCovariance())[6]*=-1;
+              ((double*)paramGArbkw.GetCovariance())[7]*=-1;
+              ((double*)paramGArbkw.GetCovariance())[10]*=-1;
+              ((double*)paramGArbkw.GetCovariance())[11]*=-1;
+            }
+            /////
+
             if (dumpStream==kFALSE) continue;
             if (tree) tree->Fill();
             else {
               (*pcstream) << "fastPart" <<
                           "i=" << i <<
                           "t=" <<t<<
+                          "paramGAr.=" <<&paramGAr<<
+                          "paramGArbkw.=" <<&paramGArbkw<<
                           "paramSt.="<<&paramSt<<
                           "paramEnd.="<<&paramEnd<<
                           "geom.="<<&geom<<
