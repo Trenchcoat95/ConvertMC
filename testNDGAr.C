@@ -6,7 +6,8 @@
     .L $fastMCKalman/fastMCKalman/MC/fastSimulation.cxx++g
     .L $ConvertMC/testNDGAr.C++g
     AliPDG::AddParticlesToPdgDataBase();
-    testNDGAr(300,kTRUE,kFALSE)
+    testNDGAr(10000,kTRUE,kTRUE,0,kTRUE,kFALSE)
+    testNDGAr(300,kTRUE,kFALSE,0,kTRUE,kTRUE)
 
  */
 #include "fastSimulation.h"
@@ -54,6 +55,26 @@ void BuiltParticleUnsmeared(fastParticle &particle, double Center[3], std::vecto
   }
 }
 
+void BuiltParticleUnsmearedNoRot(fastParticle &particle, double Center[3], std::vector<TVector3> trajxyz, std::vector<TVector3> trajxyz_uns, double alpha=0)
+{
+  for(size_t k=0;k<trajxyz.size();k++) 
+  {
+    Double_t xyz_conv[3]= {(trajxyz.at(k).Z()-Center[2]),
+                              trajxyz.at(k).Y()-Center[1],
+                              trajxyz.at(k).X()-Center[0]};
+    Double_t xyz_conv_uns[3]= {(trajxyz_uns.at(k).Z()-Center[2]),
+                              trajxyz_uns.at(k).Y()-Center[1],
+                              trajxyz_uns.at(k).X()-Center[0]};
+    //Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
+    Double_t X_loc =  xyz_conv_uns[0]*cos(alpha) + xyz_conv_uns[1]*sin(alpha);
+    Double_t Y_loc = -xyz_conv_uns[0]*sin(alpha) + xyz_conv_uns[1]*cos(alpha);
+    Double_t Z_loc =  xyz_conv_uns[2];
+    double ptemp[] = {Y_loc,Z_loc,0,0,0};
+    particle.fParamMC.resize(k+1);
+    particle.fParamMC[k].SetParamOnly(X_loc,alpha,ptemp);  
+  }
+}
+
 size_t ClosestPoint(std::vector<TVector3> trajxyz, TVector3 ClusterXYZ)
 {
   Double_t dist = 10000;
@@ -63,8 +84,8 @@ size_t ClosestPoint(std::vector<TVector3> trajxyz, TVector3 ClusterXYZ)
     double cl[] = {ClusterXYZ.X(),ClusterXYZ.Y(),ClusterXYZ.Z()};
     double traj[] = {trajxyz.at(i).X(),trajxyz.at(i).Y(),trajxyz.at(i).Z()};
     TVector3 diff = trajxyz.at(i)-ClusterXYZ;
-    Double_t checkdist = diff.Mag2();
-    checkdist = abs(ClusterXYZ.Z()-trajxyz.at(i).Z());
+    Double_t checkdist = sqrt(diff.Mag2());
+    //checkdist = sqrt(pow(ClusterXYZ.X()-trajxyz.at(i).X(),2)+pow(ClusterXYZ.Y()-trajxyz.at(i).Y(),2));
     if(checkdist<dist)
     {
       dist=checkdist;
@@ -186,7 +207,7 @@ Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom,
 
 
 Int_t BuildParticleNoRotation(fastParticle &particle, double Center[3], fastGeometry geom, 
-                   std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode)
+                   std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode, float angle = 0.)
 {
           uint fMaxLayer = 0;
           TParticlePDG *p = TDatabasePDG::Instance()->GetParticle(PDGcode);
@@ -208,9 +229,13 @@ Int_t BuildParticleNoRotation(fastParticle &particle, double Center[3], fastGeom
               Double_t pxyz_conv[3]= {(trajpxyz.at(k).Z()),
                                       trajpxyz.at(k).Y(),
                                       trajpxyz.at(k).X()};
+              //Double_t totalp = sqrt(pxyz_conv[0]*pxyz_conv[0]+pxyz_conv[0]*pxyz_conv[0]+pxyz_conv[2]*pxyz_conv[2]);
+              //if(totalp<0.01) break;
 
               Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
               Double_t radius=sqrt((xyz_conv[1])*(xyz_conv[1])+(xyz_conv[0]-278)*(xyz_conv[0]-278));
+              Double_t X_loc =  xyz_conv[0]*cos(angle) + xyz_conv[1]*sin(angle);
+              Double_t Y_loc = -xyz_conv[0]*sin(angle) + xyz_conv[1]*cos(angle);
               double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
               particle.fDirection.resize(k+1);
@@ -220,10 +245,21 @@ Int_t BuildParticleNoRotation(fastParticle &particle, double Center[3], fastGeom
 
               particle.fLoop[k]=0;
 
-              particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
-              bool statuscheck = particle.fParamMC[k].Rotate(0);
+              AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
+              bool statuscheck = param.Rotate(angle);
+              if(statuscheck){ 
+                particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
+                particle.fParamMC[k].Rotate(angle);
+                bool x = 0;
+              }
+              else {
+                double ptemp[] = {Y_loc,xyz_conv[2],0,0,0};
+                particle.fParamMC[k].SetParamOnly(X_loc,angle,ptemp);
+                double x = 0;
+              }
+              //bool statuscheck = particle.fParamMC[k].Rotate(0);
               
-              //particle.fParamMC[k].Rotate(alpha);
+              //particle.fParamMC[k].Rotate(alphca);
               uint indexR = uint(std::upper_bound (geom.fLayerRadius.begin(),geom.fLayerRadius.end(), radius)-geom.fLayerRadius.begin());
               particle.fLayerIndex[k] = indexR;
               if(k!=0)
@@ -436,9 +472,23 @@ Int_t BuildParamNDGArRecoNoRotation(AliExternalTrackParam4D &paramNDGAr4D, doubl
     return 1;
 }
 
+bool inFiducial(double x, double y, double z) {
+	double const Rcut = 400.0 /2.0;		double const Zcut = 439.4 /2.0;
+	double r = sqrt( z*z + y*y );
+	if ( r > Rcut ) return false;
+	if (fabs(x) > Zcut ) return false;
+	return true;
+};
 
+bool inTPC(double x, double y, double z) {
+	double const Rcut = 500 /2.0;		double const Zcut = 470 /2.0;
+	double r = sqrt( z*z + y*y );
+	if ( r > Rcut ) return false;
+	if (fabs(x) > Zcut ) return false;
+	return true;
+};
 
-void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent=0){
+void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent=0, bool Interaction=kFALSE, bool RotFrame = kFALSE){
 
   /// part.fStatusMaskIn[0]&8192>0&&part.fParamMC[0].GetP()<1000 conditions for drawing
 
@@ -453,9 +503,9 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   initTreeFast()
   treeFast->SetAlias("deltaP","(part.fParamMC[0].GetP()-part.fParamIn[0].GetP())/part.fParamMC[0].GetP()")
   treeFast->SetAlias("deltaPorig","(part.fParamMC[0].GetP()-paramSt.GetP())/part.fParamMC[0].GetP()")
-  treeFast->Draw("deltaP:sqrt(part.fNPointsIn[0]/part.@fParamMC.size())>>hv(1,0,1,100,-0.4,0.4)","part.fStatusMaskIn[0]&8192>0&&part.fParamMC[0].GetP()<1000&&part.fNPointsIn[0]>50","colz")
+  treeFast->Draw("deltaP:sqrt(part.fNPointsIn[0]/part.@fParamMC.size())>>hv(10,0,1,100,-0.4,0.4)","part.fStatusMaskIn[0]&8192>0&&part.fParamMC[0].GetP()<1000&&part.fNPointsIn[0]>50","colz")
   hv->FitSlicesY()
-  treeFast->Draw("deltaPorig:sqrt(part.fNPointsIn[0]/part.@fParamMC.size())>>hk(1,0,1,100,-0.4,0.4)","part.fStatusMaskIn[0]&8192>0&&part.fParamMC[0].GetP()<1000&&part.fNPointsIn[0]>50","colz")
+  treeFast->Draw("deltaPorig:sqrt(part.fNPointsIn[0]/part.@fParamMC.size())>>hk(10,0,1,100,-0.4,0.4)","part.fStatusMaskIn[0]&8192>0&&part.fParamMC[0].GetP()<1000&&part.fNPointsIn[0]>50","colz")
   hk->FitSlicesY()
   hv_2->Divide(hk_2)
   hv_2->SetTitle("Impact of skipping points on momentum resolution;#sqrt{N_{New}/N_{Old}};res_{New}/res_{Old}")
@@ -478,7 +528,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   
 
   //////////////////////////////////////////////////////////////////////////////////Create result File
-  std::string filename = "FullReco";
+  std::string filename = "FullRecoInteraction";
   if(Ideal) filename+= "Ideal";
   std::string path ="/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/";
   std::string dirname = path+filename;
@@ -496,14 +546,16 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
 
   /////////////////////////////////////////////////////////////////////////////////Read and set the tree source
   TChain* tree_source = new TChain("/anatree/GArAnaTree");    
-  tree_source->Add("/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/MC/anatree*");
+  if(Interaction) tree_source->Add("/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/MC/Interaction/*");
+  else tree_source->Add("/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/MC/anatree_range*");
   std::vector<size_t>  *TPCClusterTrkIDNumber = 0;
   std::vector<int>  *TPCClusterMCindex = 0;
   std::vector<size_t>  *TrackIDNumber = 0;
   std::vector<int>  *TrackMCindex = 0;
   std::vector<int>  *TrajMCPIndex = 0;
-  std::vector<int>  *MCTrkID = 0;
+  //std::vector<int>  *MCTrkID = 0;
   std::vector<int>     *PDG = 0;
+  std::vector<int>     *PDGMother = 0;
   std::vector<float>   *TPCClusterX = 0;
   std::vector<float>   *TPCClusterY = 0;
   std::vector<float>   *TPCClusterZ = 0;
@@ -513,6 +565,18 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   std::vector<float>   *TrajMCPX = 0;
   std::vector<float>   *TrajMCPY = 0;
   std::vector<float>   *TrajMCPZ = 0;
+  std::vector<float> *MCPStartX = 0;
+  std::vector<float> *MCPStartY = 0;
+  std::vector<float> *MCPStartZ     =0;
+  std::vector<float> *MCPStartPX    =0;
+  std::vector<float> *MCPStartPY    =0;
+  std::vector<float> *MCPStartPZ    =0;
+  std::vector<float> *MCPEndX       =0;
+  std::vector<float> *MCPEndY       =0;
+  std::vector<float> *MCPEndZ       =0;
+  std::vector<float> *MCPEndPX      =0;
+  std::vector<float> *MCPEndPY      =0;
+  std::vector<float> *MCPEndPZ      =0;
   std::vector<float> *TrackStartX = 0;
   std::vector<float> *TrackStartY = 0;
   std::vector<float> *TrackStartZ     =0;
@@ -527,13 +591,22 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   std::vector<float> *TrackEndPY      =0;
   std::vector<float> *TrackEndPZ      =0;
   std::vector<int>   *TrackEndQ       =0;
+  std::vector<float> *VertX      =0;
+  std::vector<float> *VertY      =0;
+  std::vector<float> *VertZ      =0;
+  std::vector<float> *MCVertX      =0;
+  std::vector<float> *MCVertY      =0;
+  std::vector<float> *MCVertZ      =0;
+  std::vector<int>   *GPartPdg   =0;
+  std::vector<int>   *CCNC   =0;
   TBranch        *b_TPCClusterTrkIDNumber;   //!
   TBranch        *b_TPCClusterMCindex;
   TBranch        *b_TrackIDNumber;
   TBranch        *b_TrackMCindex;
   TBranch        *b_TrajMCPIndex;
-  TBranch        *b_MCTrkID;
+  //TBranch        *b_MCTrkID;
   TBranch        *b_PDG;
+  TBranch        *b_PDGMother;
   TBranch        *b_TPCClusterX;   //!
   TBranch        *b_TPCClusterY;   //!
   TBranch        *b_TPCClusterZ;   //!
@@ -557,13 +630,34 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   TBranch *b_TrackEndPY      ;
   TBranch *b_TrackEndPZ      ;
   TBranch  *b_TrackEndQ       ;
+  TBranch *b_MCPStartX ;
+  TBranch *b_MCPStartY ;
+  TBranch *b_MCPStartZ     ;
+  TBranch *b_MCPStartPX    ;
+  TBranch *b_MCPStartPY    ;
+  TBranch *b_MCPStartPZ    ;
+  TBranch *b_MCPEndX       ;
+  TBranch *b_MCPEndY       ;
+  TBranch *b_MCPEndZ       ;
+  TBranch *b_MCPEndPX      ;
+  TBranch *b_MCPEndPY      ;
+  TBranch *b_MCPEndPZ      ;
+  TBranch *b_VertX      ;
+  TBranch *b_VertY      ;
+  TBranch *b_VertZ      ;
+  TBranch *b_MCVertX      ;
+  TBranch *b_MCVertY      ;
+  TBranch *b_MCVertZ      ;
+  TBranch *b_GPartPdg   ;
+  TBranch *b_CCNC       ;
   tree_source->SetBranchAddress("TPCClusterTrkIDNumber", &TPCClusterTrkIDNumber, &b_TPCClusterTrkIDNumber);
   tree_source->SetBranchAddress("TPCClusterMCindex", &TPCClusterMCindex, &b_TPCClusterMCindex);
   tree_source->SetBranchAddress("TrackIDNumber", &TrackIDNumber, &b_TrackIDNumber);
   tree_source->SetBranchAddress("TrackMCindex", &TrackMCindex, &b_TrackMCindex);
   tree_source->SetBranchAddress("TrajMCPIndex", &TrajMCPIndex, &b_TrajMCPIndex);
-  tree_source->SetBranchAddress("MCTrkID", &MCTrkID, &b_MCTrkID);
+  //tree_source->SetBranchAddress("MCTrkID", &MCTrkID, &b_MCTrkID);
   tree_source->SetBranchAddress("PDG", &PDG, &b_PDG);
+  tree_source->SetBranchAddress("PDGMother", &PDGMother, &b_PDGMother);
   tree_source->SetBranchAddress("TPCClusterX", &TPCClusterX, &b_TPCClusterX);
   tree_source->SetBranchAddress("TPCClusterY", &TPCClusterY, &b_TPCClusterY);
   tree_source->SetBranchAddress("TPCClusterZ", &TPCClusterZ, &b_TPCClusterZ);
@@ -587,6 +681,26 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   tree_source->SetBranchAddress("TrackEndPY", &TrackEndPY, &b_TrackEndPY);
   tree_source->SetBranchAddress("TrackEndPZ", &TrackEndPZ, &b_TrackEndPZ);
   tree_source->SetBranchAddress("TrackEndQ", &TrackEndQ, &b_TrackEndQ);
+  tree_source->SetBranchAddress("MCPStartX", &MCPStartX, &b_MCPStartX);
+  tree_source->SetBranchAddress("MCPStartY", &MCPStartY, &b_MCPStartY);
+  tree_source->SetBranchAddress("MCPStartZ", &MCPStartZ, &b_MCPStartZ);
+  tree_source->SetBranchAddress("MCPStartPX", &MCPStartPX, &b_MCPStartPX);
+  tree_source->SetBranchAddress("MCPStartPY", &MCPStartPY, &b_MCPStartPY);
+  tree_source->SetBranchAddress("MCPStartPZ", &MCPStartPZ, &b_MCPStartPZ);
+  tree_source->SetBranchAddress("MCPEndX", &MCPEndX, &b_MCPEndX);
+  tree_source->SetBranchAddress("MCPEndY", &MCPEndY, &b_MCPEndY);
+  tree_source->SetBranchAddress("MCPEndZ", &MCPEndZ, &b_MCPEndZ);
+  tree_source->SetBranchAddress("MCPEndPX", &MCPEndPX, &b_MCPEndPX);
+  tree_source->SetBranchAddress("MCPEndPY", &MCPEndPY, &b_MCPEndPY);
+  tree_source->SetBranchAddress("MCPEndPZ", &MCPEndPZ, &b_MCPEndPZ);
+  tree_source->SetBranchAddress("VertX", &VertX, &b_VertX);
+  tree_source->SetBranchAddress("VertY", &VertY, &b_VertY);
+  tree_source->SetBranchAddress("VertZ", &VertZ, &b_VertZ);
+  tree_source->SetBranchAddress("MCVertX", &MCVertX, &b_MCVertX);
+  tree_source->SetBranchAddress("MCVertY", &MCVertY, &b_MCVertY);
+  tree_source->SetBranchAddress("MCVertZ", &MCVertZ, &b_MCVertZ);
+  tree_source->SetBranchAddress("GPartPdg", &GPartPdg, &b_GPartPdg);
+  tree_source->SetBranchAddress("CCNC", &CCNC, &b_CCNC);
 
   int nEvSource = tree_source->GetEntries();
   nEv = std::min(nEv,nEvSource);
@@ -601,7 +715,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   geom.fBz=-5;
   float resol[2]={0.0001,0.0001};
   resol[0]=0.4;                   
-  resol[1]=0.2;
+  resol[1]=0.3;
   geom.setLayerRadiusPower(0,nLayerTPC,1,nLayerTPC,1.0,xx0,xrho,resol);
   for (size_t iLayer=0; iLayer<geom.fLayerX0.size();iLayer++) {
         geom.fLayerX0[iLayer] = xx0 * kMaterialScaling;
@@ -620,7 +734,13 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
       tree_source->GetEntry(i);
       if(TrackIDNumber->size()==0) continue;
 
+      if(Interaction && CCNC!=0 && GPartPdg->at(0)!=14) continue; //If analysing Interaction file only consider numuCC events   
 
+      if(Interaction && !Ideal && VertX->size()==0) continue;
+      if(Interaction && !Ideal) {
+        bool vert_in_fid = inFiducial(MCVertZ->at(0)-GArCenter[2],MCVertY->at(0)-GArCenter[1],MCVertX->at(0)-GArCenter[0]);
+        if(!vert_in_fid) continue; //If analysng realistic Interaction sample, apply fiducial cut
+      }
 
 
       size_t ID = 0;
@@ -650,11 +770,16 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
       for(size_t t=0; t<TrksXYZ.size(); t++)   ////Cycle over all the tracks for the event 
                                                ////Note that in the final tree the separation between events is lost and each item is a track)
       {    
-        if(t>0) continue;
+        if(!Interaction && t>0) continue; //If analyzing particle gun file, only consider first track
+        //if(t!=7) continue;
+        long PDGcode=PDG->at(MCID_vector.at(t));    ////Save PDGCode for the MC trajectory associated with the ND-GAr reconstructed track
+        long PDGMothercode=PDGMother->at(MCID_vector.at(t));    ////Save PDGCode for the MC trajectory associated with the ND-GAr reconstructed track
+        // bool contained = inTPC(MCPStartZ->at(MCID_vector.at(t))-GArCenter[2],MCPStartY->at(MCID_vector.at(t))-GArCenter[1],MCPStartX->at(MCID_vector.at(t))-GArCenter[0]);
+        // contained *= inTPC(MCPEndZ->at(MCID_vector.at(t))-GArCenter[2],MCPEndY->at(MCID_vector.at(t))-GArCenter[1],MCPEndX->at(MCID_vector.at(t))-GArCenter[0]);
+        if(abs(PDGcode)!=13 || PDGMothercode!=0 ) continue;
 
 
-
-          ///////Find MC trajectory that produced the track and save  the xyz's and pxyz's
+          ///////Match MC trajectory that produced the track and save  the xyz's and pxyz's
           std::vector<TVector3> trajxyz;                
           std::vector<TVector3> trajpxyz;
           for(size_t u=0; u<TrajMCPX->size(); u++)          
@@ -672,9 +797,8 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
           if(trajxyz.size()==0) continue;       /////Skip tracks that were not successfully associated to a MC trajectory by the back-tracker
 
           
-          long PDGcode=PDG->at(MCID_vector.at(t));    ////Save PDGCode for the MC trajectory associated with the ND-GAr reconstructed track
 
-          if(PDGcode==0 || abs(PDGcode)==14 || abs(PDGcode)!=13 ) continue;   ////For now only checking muons 
+          if(!Interaction && abs(PDGcode)!=13 ) continue;   ////If analyzing partigle gun file, only consider muons 
           std::cout<<"ID: "<<ID_vector.at(t)<<" PDG: "<<PDGcode<<" ev: "<< i <<std::endl;
 
 
@@ -701,6 +825,9 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
 
           ///Now that we have vectors of sorted TPCClusters we can find the closest trajectory point for each cluster 
           ///and save the MC pxyz information for each point
+          ///Note that if IsForwardf=kTRUE it means that the forward ordering produced by sort_TPCClusters_along_track2 
+          ///matches the actual order of the trajectory points
+
           Bool_t IsForwardf, isForwardb;
           std::vector<TVector3> trajpxyzb_NDGAr;
           std::vector<TVector3> trajxyzb_NDGAr;
@@ -715,6 +842,9 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
           TVector3 xyzSt(TrackStartX->at(t),TrackStartY->at(t),TrackStartZ->at(t));
           TVector3 pxyzSt(TrackStartPX->at(t),TrackStartPY->at(t),TrackStartPZ->at(t));
           int qSt = TrackStartQ->at(t);
+          TVector3 xyzStMC(MCPStartX->at(MCID_vector.at(t)),MCPStartY->at(MCID_vector.at(t)),MCPStartZ->at(MCID_vector.at(t)));
+          TVector3 pxyzStMC(MCPStartPX->at(MCID_vector.at(t)),MCPStartPY->at(MCID_vector.at(t)),MCPStartPZ->at(MCID_vector.at(t)));
+          int qStMC = (PDGcode == 13)?-1:1;
           BuildParamNDGArReco(paramSt0,GArCenter,xyzSt,pxyzSt,PDGcode,qSt);
 
 
@@ -723,12 +853,21 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
           TVector3 xyzEnd(TrackEndX->at(t),TrackEndY->at(t),TrackEndZ->at(t));
           TVector3 pxyzEnd(TrackEndPX->at(t),TrackEndPY->at(t),TrackEndPZ->at(t));
           int qEnd = TrackEndQ->at(t);
+          TVector3 xyzEndMC(MCPEndX->at(MCID_vector.at(t)),MCPEndY->at(MCID_vector.at(t)),MCPEndZ->at(MCID_vector.at(t)));
+          TVector3 pxyzEndMC(MCPEndPX->at(MCID_vector.at(t)),MCPEndPY->at(MCID_vector.at(t)),MCPEndPZ->at(MCID_vector.at(t)));
+          int qEndMC = (PDGcode == 13)?-1:1;
           BuildParamNDGArReco(paramEnd0,GArCenter,xyzEnd,pxyzEnd,PDGcode,qEnd);
 
           AliExternalTrackParam4D paramSt;
           AliExternalTrackParam4D paramEnd;
 
-          if(!IsForwardf)
+          //NB: In GArSoft what is labeled as TrackStart is positioned at the last TPCCluster,
+          //following the sort_TPCClusters_along_track2 forward ordering.
+          //If the forward ordering matches the trajectory ordering IsForwardf=kTRUE,
+          //hence, what we would consider to be the actual track start (i.e. the extremity closest to the trajectory start) 
+          //is labelled by GArSoft as TrackEnd and viceversa
+
+          if(!IsForwardf) 
           {
             paramSt = paramSt0;
             paramEnd = paramEnd0;
@@ -743,16 +882,20 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
           ///Start of the track
           AliExternalTrackParam4D paramStNoRot0;
           BuildParamNDGArRecoNoRotation(paramStNoRot0,GArCenter,xyzSt,pxyzSt,PDGcode,qSt);
+          AliExternalTrackParam4D paramStNoRotMC;
+          BuildParamNDGArRecoNoRotation(paramStNoRotMC,GArCenter,xyzStMC,pxyzStMC,PDGcode,qStMC);
 
 
           ///End of the track
           AliExternalTrackParam4D paramEndNoRot0;
           BuildParamNDGArRecoNoRotation(paramEndNoRot0,GArCenter,xyzEnd,pxyzEnd,PDGcode,qEnd);
+          AliExternalTrackParam4D paramEndNoRotMC;
+          BuildParamNDGArRecoNoRotation(paramEndNoRotMC,GArCenter,xyzEndMC,pxyzEndMC,PDGcode,qEndMC);
 
           AliExternalTrackParam4D paramStNoRot;
           AliExternalTrackParam4D paramEndNoRot;
 
-          if(stZ>endZ)
+          if(!IsForwardf) //If Trk points are "forward" ordered (i.e. same order as trajMC) by sort_TPCClusters_along_track2, GArSoft reconstructs the end; it's the opposite in our code
           {
             paramStNoRot = paramStNoRot0;
             paramEndNoRot = paramEndNoRot0;
@@ -774,13 +917,29 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
             particle.fgStreamer=pcstream;
             particle.gid=ID_vector.at(t);
             particle.fDecayLength=0;
-            //BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  //////Built the ALICE particle with the MC trajectory xyz and pxyz points 
-            BuildParticleNoRotation(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);
-            if(particle.fParamMC.size()==0) continue;
+            if(RotFrame){
+              BuildParticle(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode);  //////Built the ALICE particle with the MC trajectory xyz and pxyz points 
+              if(particle.fParamMC.size()==0) continue;
+              particle.reconstructParticleFull(geom,PDGcode,10000);
+              //particle.reconstructParticleFullOut(geom,PDGcode,10000);
+              //particle.refitParticle();
+            }else{
+              BuildParticleNoRotation(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode,0);
+              if(particle.fParamMC.size()==0) continue;
 
-            particle.reconstructParticleRotate0(geom,PDGcode,10000);
-            //particle.reconstructParticleFullOut(geom,PDGcode,10000);
-            //particle.refitParticle();
+              particle.reconstructParticleRotate0(geom,PDGcode,10000);
+              if (particle.fParamInRot[0].GetCovariance()[0]==0){
+                for(int a=1;a<=50;a++)
+                {
+                  BuildParticleNoRotation(particle,GArCenter,geom,trajxyz,trajpxyz,PDGcode,a*Pi()/50);
+                  particle.reconstructParticleRotate0(geom,PDGcode,10000);
+                  if(particle.fParamInRot[0].GetCovariance()[0]!=0) {
+                    break;
+                  }
+                }
+              }
+            }
+
 
             if (dumpStream==kFALSE) continue;
             if (tree) tree->Fill();
@@ -794,6 +953,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
                           "paramEnd.="<<&paramEnd<<
                           "paramStNoRot.="<<&paramStNoRot<<
                           "paramEndNoRot.="<<&paramEndNoRot<<
+                          "paramStNoRotMC.="<<&paramStNoRotMC<<
                           "geom.="<<&geom<<
                           "part.=" << &particle <<
                           "\n";
@@ -809,7 +969,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
             //std::cout<<"Forward ordering reconstruction"<<std::endl;
             fastParticle particle_f(hlf.size()+1);
             particle_f.fAddMSsmearing=true;
-            particle_f.fAddPadsmearing=false;
+            particle_f.fAddPadsmearing=true;
             particle_f.fUseGArSeeding=false;
             particle_f.fUseMCInfo=false;
             particle_f.fgStreamer=pcstream;
@@ -824,40 +984,68 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
             particle_f_nosmear.gid=ID_vector.at(t);
             particle_f_nosmear.fDecayLength=0;
             
-            // if(IsForwardf){
-            //   std::cout<<"Forward"<<std::endl;
-            //   BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
-            //   SetParticleLoop(particle_f);
-            //   BuiltParticleUnsmeared(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr);
-            //   if(particle_f.fParamMC.size()==0) continue;
-            // }
-            // else{
-            //   std::cout<<"Backwards"<<std::endl;
-            //   BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
-            //   SetParticleLoop(particle_f);
-            //   BuiltParticleUnsmeared(particle_f_nosmear,GArCenter,TrkClusterXYZb_NDGAr,trajxyzb_NDGAr);
-            //   if(particle_f.fParamMC.size()==0) continue;
-            // }
-            // particle_f.reconstructParticleFull(geom,PDGcode,10000);
+            if(RotFrame){
+              if(IsForwardf){
+                std::cout<<"Forward"<<std::endl;
+                BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
+                //SetParticleLoop(particle_f);
+                //BuiltParticleUnsmeared(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr);
+                if(particle_f.fParamMC.size()==0) continue;
+              }
+              else{
+                std::cout<<"Backwards"<<std::endl;
+                BuildParticle(particle_f,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
+                //SetParticleLoop(particle_f);
+                //BuiltParticleUnsmeared(particle_f_nosmear,GArCenter,TrkClusterXYZb_NDGAr,trajxyzb_NDGAr);
+                if(particle_f.fParamMC.size()==0) continue;
+              }
+              particle_f.reconstructParticleFull(geom,PDGcode,10000);
+            }
+            else{
 
             if(IsForwardf){
               std::cout<<"Forward"<<std::endl;
               BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
               //SetParticleLoop(particle_f);
-              //BuiltParticleUnsmeared(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr);
+              BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr);
               if(particle_f.fParamMC.size()==0) continue;
+              particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
+              if (particle_f.fParamInRot[0].GetCovariance()[0]==0){
+                for(int a=1;a<=50;a++)
+                {
+                  BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode,a*Pi()/50);
+                  particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
+                  BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr,a*Pi()/50);
+                  if(particle_f.fParamInRot[0].GetCovariance()[0]!=0) {
+                    break;
+                  }
+                }
+              }
             }
             else{
               std::cout<<"Backwards"<<std::endl;
               BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode);  /////Build the ALICE particle with Track XYZClusters ordered forward and closest MC pxyz
               //SetParticleLoop(particle_f);
-              //BuiltParticleUnsmeared(particle_f_nosmear,GArCenter,TrkClusterXYZb_NDGAr,trajxyzb_NDGAr);
+              BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZb_NDGAr,trajxyzb_NDGAr);
               if(particle_f.fParamMC.size()==0) continue;
+              particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
+              if (particle_f.fParamInRot[0].GetCovariance()[0]==0){
+                for(int a=1;a<=50;a++)
+                {
+                  BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode,a*Pi()/50);
+                  particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
+                  BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZb_NDGAr,trajxyzb_NDGAr,a*Pi()/50);
+                  if(particle_f.fParamInRot[0].GetCovariance()[0]!=0) {
+                    break;
+                  }
+                }
+              }
             }
-            particle_f.reconstructParticleRotate0(geom,PDGcode,10000);            
+            //particle_f.reconstructParticleRotate0(geom,PDGcode,10000);            
             
             //particle_f.reconstructParticleFullOut(geom,PDGcode,10000);
             //particle_f.refitParticle();
+            }
 
             ////// Create particle object with ALICE-like global coordinates
 
@@ -872,6 +1060,8 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
                           "paramEnd.="<<&paramEnd<<
                           "paramStNoRot.="<<&paramStNoRot<<
                           "paramEndNoRot.="<<&paramEndNoRot<<
+                          "paramStNoRotMC.="<<&paramStNoRotMC<<
+                          "paramEndNoRotMC.="<<&paramEndNoRotMC<<
                           "geom.="<<&geom<<
                           "part.=" << &particle_f <<
                           "partnosmear.=" << &particle_f_nosmear <<
