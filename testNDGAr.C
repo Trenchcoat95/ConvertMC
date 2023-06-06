@@ -244,11 +244,17 @@ Int_t BuildParticleNoRotation(fastParticle &particle, double Center[3], fastGeom
               particle.fLoop.resize(k+1);
 
               particle.fLoop[k]=0;
-
-              AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
+              Float_t dirX=(trajxyz.at(trajxyz.size()-1).Z())-(trajxyz.at(0).Z()); 
+              dirX>0? dirX=1:dirX=-1;
+              if(dirX<0){
+                pxyz_conv[0]*=-1;
+                pxyz_conv[1]*=-1;
+                pxyz_conv[2]*=-1;
+              }
+              AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign*dirX);
               bool statuscheck = param.Rotate(angle);
               if(statuscheck){ 
-                particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
+                particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign*dirX);
                 particle.fParamMC[k].Rotate(angle);
                 bool x = 0;
               }
@@ -398,7 +404,7 @@ Int_t BuildParamNDGArReco(AliExternalTrackParam4D &paramNDGAr4D, double Center[3
 
 Int_t BuildParamNDGArRecoNoRotation(AliExternalTrackParam4D &paramNDGAr4D, double Center[3], 
                           TVector3 trajxyz, TVector3 trajpxyz, long PDGcode,
-                          Short_t signr=0)
+                          Short_t signr=0, double angle=0)
 {
     TParticlePDG *p = TDatabasePDG::Instance()->GetParticle(PDGcode);
     if (p == nullptr) {
@@ -428,7 +434,7 @@ Int_t BuildParamNDGArRecoNoRotation(AliExternalTrackParam4D &paramNDGAr4D, doubl
     double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
     AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
     AliExternalTrackParam4D param4D(param,mass,1);
-    bool status = param4D.Rotate(0);
+    bool status = param4D.Rotate(angle);
 
     Double_t pxyz_conv_test[3];
     param4D.GetPxPyPz(pxyz_conv_test);
@@ -438,7 +444,7 @@ Int_t BuildParamNDGArRecoNoRotation(AliExternalTrackParam4D &paramNDGAr4D, doubl
     {
           AliExternalTrackParam param_inv(xyz_conv,pxyz_inv,covar,sign);
           AliExternalTrackParam4D param4D_inv(param_inv,mass,1);
-          status = param4D_inv.Rotate(0);
+          status = param4D_inv.Rotate(angle);
           param4D_inv_perm=param4D_inv;
           Double_t pxyz_conv_test_inv[3];
           param4D_inv.GetPxPyPz(pxyz_conv_test_inv);
@@ -518,7 +524,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   const Float_t xrho=0.016770000; //rho g/cm^3 for ArCH4 at 10 atm
   const Float_t kMaterialScaling=1;      ////Promote to global variable
   double GArCenter[3]={0,-150.473,1486}; 
-  float fSortDistCut = 10.0;
+  float fSortDistCut = 20.0;
   float fPrintLevel = 0.0;
             
 
@@ -528,7 +534,8 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
   
 
   //////////////////////////////////////////////////////////////////////////////////Create result File
-  std::string filename = "FullRecoInteraction";
+  std::string filename = "FullReco";
+  if(Interaction) filename+="Interaction";
   if(Ideal) filename+= "Ideal";
   std::string path ="/home/federico/Documents/Universita/Federico_2020-2021/Aliwork/ConvertMC/";
   std::string dirname = path+filename;
@@ -776,7 +783,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
         long PDGMothercode=PDGMother->at(MCID_vector.at(t));    ////Save PDGCode for the MC trajectory associated with the ND-GAr reconstructed track
         // bool contained = inTPC(MCPStartZ->at(MCID_vector.at(t))-GArCenter[2],MCPStartY->at(MCID_vector.at(t))-GArCenter[1],MCPStartX->at(MCID_vector.at(t))-GArCenter[0]);
         // contained *= inTPC(MCPEndZ->at(MCID_vector.at(t))-GArCenter[2],MCPEndY->at(MCID_vector.at(t))-GArCenter[1],MCPEndX->at(MCID_vector.at(t))-GArCenter[0]);
-        if(abs(PDGcode)!=13 || PDGMothercode!=0 ) continue;
+        if(Interaction && (abs(PDGcode)!=13 || PDGMothercode!=0) ) continue;
 
 
           ///////Match MC trajectory that produced the track and save  the xyz's and pxyz's
@@ -969,7 +976,7 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
             //std::cout<<"Forward ordering reconstruction"<<std::endl;
             fastParticle particle_f(hlf.size()+1);
             particle_f.fAddMSsmearing=true;
-            particle_f.fAddPadsmearing=true;
+            particle_f.fAddPadsmearing=false;
             particle_f.fUseGArSeeding=false;
             particle_f.fUseMCInfo=false;
             particle_f.fgStreamer=pcstream;
@@ -1011,15 +1018,22 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
               if(particle_f.fParamMC.size()==0) continue;
               particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
               if (particle_f.fParamInRot[0].GetCovariance()[0]==0){
-                for(int a=1;a<=50;a++)
+                for(int a=0;a<=180;a++)
                 {
-                  BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode,a*Pi()/50);
-                  particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
-                  BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr,a*Pi()/50);
+                  BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode,a*Pi()/180.);
+                  bool statuscheck = particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
+                  BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr,a*Pi()/180.);
                   if(particle_f.fParamInRot[0].GetCovariance()[0]!=0) {
                     break;
                   }
                 }
+                // Float_t deltay_beta = abs(TrkClusterXYZf_NDGAr.at(TrkClusterXYZf_NDGAr.size()-1).Y()-TrkClusterXYZf_NDGAr.at(0).Y());
+                // Float_t deltax_beta = abs(TrkClusterXYZf_NDGAr.at(TrkClusterXYZf_NDGAr.size()-1).Z()-TrkClusterXYZf_NDGAr.at(0).Z());
+                // Float_t beta = TMath::ATan2(deltay_beta,deltax_beta);
+                // Float_t alpha_fr = beta+Pi()/4.;
+                // BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZf_NDGAr,trajpxyzf_NDGAr,PDGcode,besta*Pi()/180.);
+                // particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
+                // BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr,besta*Pi()/180.);
               }
             }
             else{
@@ -1030,21 +1044,17 @@ void testNDGAr(Int_t nEv, bool dumpStream=1, bool Ideal=kTRUE, size_t FirstEvent
               if(particle_f.fParamMC.size()==0) continue;
               particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
               if (particle_f.fParamInRot[0].GetCovariance()[0]==0){
-                for(int a=1;a<=50;a++)
-                {
-                  BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode,a*Pi()/50);
-                  particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
-                  BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZb_NDGAr,trajxyzb_NDGAr,a*Pi()/50);
-                  if(particle_f.fParamInRot[0].GetCovariance()[0]!=0) {
-                    break;
+                  for(int a=0;a<=180;a++)
+                  {
+                    BuildParticleNoRotation(particle_f,GArCenter,geom,TrkClusterXYZb_NDGAr,trajpxyzb_NDGAr,PDGcode,a*Pi()/180.);
+                    bool statuscheck = particle_f.reconstructParticleRotate0(geom,PDGcode,10000);
+                    BuiltParticleUnsmearedNoRot(particle_f_nosmear,GArCenter,TrkClusterXYZf_NDGAr,trajxyzf_NDGAr,a*Pi()/180.);
+                    if(particle_f.fParamInRot[0].GetCovariance()[0]!=0) {
+                      break;
+                    }
                   }
-                }
               }
             }
-            //particle_f.reconstructParticleRotate0(geom,PDGcode,10000);            
-            
-            //particle_f.reconstructParticleFullOut(geom,PDGcode,10000);
-            //particle_f.refitParticle();
             }
 
             ////// Create particle object with ALICE-like global coordinates
@@ -1104,5 +1114,14 @@ void initTreeFast(const char * inputList="fastParticle.list"){
   treeFast->SetAlias("rMCSt","TMath::Sqrt((1. - part.fParamMC[0].fP[2])*(1. + part.fParamMC[0].fP[2]))");
   treeFast->SetAlias("pxMCSt","ptMCSt*(rMCSt*TMath::Cos(part.fParamMC[0].fAlpha) - part.fParamMC[0].fP[2]*TMath::Sin(part.fParamMC[0].fAlpha))");
   treeFast->SetAlias("pyMCSt","ptMCSt*(part.fParamMC[0].fP[2]*TMath::Cos(part.fParamMC[0].fAlpha) + rMCSt*TMath::Sin(part.fParamMC[0].fAlpha))");
+
+  treeFast->SetAlias("yend","fParamMC[fParamMC@.size()-1].fP[0]");
+  treeFast->SetAlias("ystart","fParamMC[0].fP[0]");
+  treeFast->SetAlias("xend","fParamMC[fParamMC@.size()-1].fX");
+  treeFast->SetAlias("xstart","fParamMC[0].fX");
+  treeFast->SetAlias("lArmMC","sqrt((xend-xstart)*(xend-xstart)+(yend-ystart)*(yend-ystart))");
+
+  treeFast->SetAlias("gxMC","part.fParamMC[].fX*cos(part.fParamMC[].fAlpha)-part.fParamMC[].fP[0]*sin(part.fParamMC[].fAlpha)");
+  treeFast->SetAlias("gyMC","part.fParamMC[].fX*sin(part.fParamMC[].fAlpha)+part.fParamMC[].fP[0]*cos(part.fParamMC[].fAlpha)");
 
 }
