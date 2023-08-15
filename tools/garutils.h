@@ -369,15 +369,15 @@ double CheckLooperMC(fastParticle particle){
 }
 
 
-void BuiltParticleUnsmeared(fastParticle &particle, double Center[3], std::vector<TVector3> trajxyz, std::vector<TVector3> trajxyz_uns)
+void BuiltParticleUnsmeared(fastParticle &particle, double Center[3], std::vector<TVector3> trajxyz, std::vector<TVector3> trajxyz_uns,double displaceX, double displaceY)
 {
   for(size_t k=0;k<trajxyz.size();k++) 
   {
-    Double_t xyz_conv[3]= {trajxyz.at(k).Z()-(Center[2]-278),
-                              trajxyz.at(k).Y()-Center[1],
+    Double_t xyz_conv[3]= {trajxyz.at(k).Z()-(Center[2]-displaceX),
+                              trajxyz.at(k).Y()-(Center[1]-displaceY),
                               trajxyz.at(k).X()-Center[0]};
-    Double_t xyz_conv_uns[3]= {trajxyz_uns.at(k).Z()-(Center[2]-278),
-                              trajxyz_uns.at(k).Y()-Center[1],
+    Double_t xyz_conv_uns[3]= {trajxyz_uns.at(k).Z()-(Center[2]-displaceX),
+                              trajxyz_uns.at(k).Y()-(Center[1]-displaceY),
                               trajxyz_uns.at(k).X()-Center[0]};
     Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
     Double_t X_loc =  xyz_conv_uns[0]*cos(alpha) + xyz_conv_uns[1]*sin(alpha);
@@ -502,7 +502,7 @@ void ClosestTrajectory(std::vector<TVector3> trajxyz, std::vector<TVector3> traj
   else IsForward=kFALSE;
 }
 
-Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom, 
+Int_t BuildParticleCov(fastParticle &particle, double Center[3], fastGeometry geom, 
                    std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode, std::vector<float> CovXX,std::vector<float> CovYY)
 {
           uint fMaxLayer = 0;
@@ -587,11 +587,110 @@ Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom,
               particle.fLayerIndex[k] = indexR;
               if(k!=0)
               {
-                TVector3 xyz_prev(trajxyz.at(k-1).Z()-Center[2],
-                                  trajxyz.at(k-1).Y()-Center[1],
-                                  trajxyz.at(k-1).X()-Center[0]);
-                Double_t r_prev = sqrt(xyz_prev.Y()*xyz_prev.Y()+xyz_prev.X()*xyz_prev.X());
-                if((radius/r_prev)>1) particle.fDirection[k] = +1;
+                // TVector3 xyz_prev(trajxyz.at(k-1).Z()-Center[2],
+                //                   trajxyz.at(k-1).Y()-Center[1],
+                //                   trajxyz.at(k-1).X()-Center[0]);
+                // Double_t r_prev = sqrt(xyz_prev.Y()*xyz_prev.Y()+xyz_prev.X()*xyz_prev.X());
+                double x_now = particle.fParamMC[k].GetX();
+                double x_prev = particle.fParamMC[k-1].GetX();
+                if((x_now/x_prev)>1) particle.fDirection[k] = +1;
+                else particle.fDirection[k] = -1;
+              }
+              else particle.fDirection[k] = +1;
+
+              if (indexR>fMaxLayer) fMaxLayer=indexR;
+          }
+          if(particle.fDirection.size()>1) particle.fDirection[0]=particle.fDirection[1];
+
+          return 1;
+}
+
+Int_t BuildParticle(fastParticle &particle, double Center[3], fastGeometry geom, 
+                   std::vector<TVector3> trajxyz, std::vector<TVector3> trajpxyz, long PDGcode, double displaceX, double displaceY)
+{
+          uint fMaxLayer = 0;
+          TParticlePDG *p = TDatabasePDG::Instance()->GetParticle(PDGcode);
+          if (p == nullptr) {
+            ::Error("fastParticle::simulateParticle", "Invalid pdgCode %ld", PDGcode);
+            return -1;
+          }
+          Short_t sign = 1 * p->Charge() / 3.;
+          Float_t mass = p->Mass();
+          particle.fMassMC=mass;
+
+          for(size_t k=0;k<trajxyz.size();k++) 
+          {
+              Bool_t invert = kFALSE;
+              Double_t xyz_conv[3]= {(trajxyz.at(k).Z()-(Center[2]-displaceX)),
+                                (trajxyz.at(k).Y()-(Center[1]-displaceY)),
+                                trajxyz.at(k).X()-Center[0]};
+
+              Double_t pxyz_conv[3]= {(trajpxyz.at(k).Z()),
+                                      trajpxyz.at(k).Y(),
+                                      trajpxyz.at(k).X()};
+
+              Double_t alpha=TMath::ATan2(xyz_conv[1],xyz_conv[0]);
+              Double_t radius=sqrt((xyz_conv[1]-displaceY)*(xyz_conv[1]-displaceY)+(xyz_conv[0]-displaceX)*(xyz_conv[0]-displaceX));
+              Double_t X_loc =  xyz_conv[0]*cos(alpha) + xyz_conv[1]*sin(alpha);
+              Double_t Y_loc = -xyz_conv[0]*sin(alpha) + xyz_conv[1]*cos(alpha);
+              //Double_t param[5]={Y_loc,xyz_conv.Z(),0,0,0};              
+              //particle.fParamMC[k].SetParamOnly(X_loc,alpha,param);
+              double covar[21]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+              AliExternalTrackParam param(xyz_conv,pxyz_conv,covar,sign);
+              AliExternalTrackParam4D param4D(param,mass,1);
+              Double_t pxyz_conv_test[3];
+              param4D.GetPxPyPz(pxyz_conv_test);
+              Bool_t status = param4D.Rotate(alpha);
+              Double_t pxyz_inv[3] = {-pxyz_conv[0],-pxyz_conv[1],-pxyz_conv[2]};
+
+              if(abs(pxyz_conv_test[0]-pxyz_conv[0])>0.00001)
+              {
+                AliExternalTrackParam param_inv(xyz_conv,pxyz_inv,covar,sign);
+                AliExternalTrackParam4D param4D_inv(param_inv,mass,1);
+                status = param4D_inv.Rotate(alpha);
+                // Double_t pxyz_inv_test[3];
+                // param4D_inv.GetPxPyPz(pxyz_inv_test);
+                // param4D = param4D_inv;
+                // Double_t pxyz_inv_test2[3];
+                // param4D.GetPxPyPz(pxyz_inv_test2);
+                invert=kTRUE;
+              }
+
+              particle.fDirection.resize(k+1);
+              particle.fParamMC.resize(k+1);
+              particle.fResolRPhi.resize(k+1);
+              particle.fResolZ.resize(k+1);
+              particle.fLayerIndex.resize(k+1);
+              if(status)
+              {
+                if(!invert)
+                {
+                  particle.fParamMC[k].Set(xyz_conv,pxyz_conv,covar,sign);
+                  particle.fParamMC[k].Rotate(alpha);
+                }
+                else
+                {
+                  particle.fParamMC[k].Set(xyz_conv,pxyz_inv,covar,-sign);
+                  particle.fParamMC[k].Rotate(alpha);
+                }
+              }
+              else
+              {
+                double ptemp[] = {Y_loc,xyz_conv[2],0,0,0};
+                particle.fParamMC[k].SetParamOnly(X_loc,alpha,ptemp);
+              }
+              //particle.fParamMC[k].Rotate(alpha);
+              uint indexR = uint(std::upper_bound (geom.fLayerRadius.begin(),geom.fLayerRadius.end(), radius)-geom.fLayerRadius.begin());
+              particle.fLayerIndex[k] = indexR;
+              if(k!=0)
+              {
+                // TVector3 xyz_prev(trajxyz.at(k-1).Z()-Center[2],
+                //                   trajxyz.at(k-1).Y()-Center[1],
+                //                   trajxyz.at(k-1).X()-Center[0]);
+                // Double_t r_prev = sqrt(xyz_prev.Y()*xyz_prev.Y()+xyz_prev.X()*xyz_prev.X());
+                double x_now = particle.fParamMC[k].GetX();
+                double x_prev = particle.fParamMC[k-1].GetX();
+                if((x_now/x_prev)>1) particle.fDirection[k] = +1;
                 else particle.fDirection[k] = -1;
               }
               else particle.fDirection[k] = +1;
@@ -686,7 +785,7 @@ Int_t BuildParticleNoRotation(fastParticle &particle, double Center[3], fastGeom
 
 Int_t BuildInRotfromIn(fastParticle &particle){
   particle.fLengthInRot=0;
-  particle.fParamInRot.resize(particle.fParamMC.size()+1);
+  particle.fParamInRot.resize(particle.fParamMC.size());
   for(int i=0; i<particle.fParamMC.size(); i++){
     particle.fParamInRot[i]=particle.fParamIn[i];
     if(i==0) particle.fLengthInRot=0;
@@ -695,7 +794,7 @@ Int_t BuildInRotfromIn(fastParticle &particle){
       double xyz[3];
       particle.fParamInRot[i-1].GetXYZ(xyzp);
       particle.fParamInRot[i].GetXYZ(xyz);
-      particle.fLengthInRot+=sqrt(pow(xyz[0]-xyzp[0],2)+pow(xyz[1]-xyzp[1],2)+pow(xyz[1]-xyzp[1],2));
+      if(xyz[0]!=0&&xyz[1]!=0&&xyz[2]!=0&&xyzp[0]!=0&&xyzp[1]!=0&&xyzp[2]!=0) particle.fLengthInRot+=sqrt(pow(xyz[0]-xyzp[0],2)+pow(xyz[1]-xyzp[1],2)+pow(xyz[1]-xyzp[1],2));
     }
 
   }
