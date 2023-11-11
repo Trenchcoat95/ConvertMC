@@ -25,9 +25,9 @@ def Plot_prof_InRot(tree,ParamType1,ParamType2,Var,VarName,BinsRangeX,BinsRangeY
     hpk = ROOT.gPad.GetPrimitive("hpk")
     hpk.FitSlicesY()
     hpk_mean = ROOT.gDirectory.Get("hpk_1")
-    hpk_mean.SetTitle(";"+VarName+"; #mu((p_{reco}-p_{MC})/p_{MC})")
+    hpk_mean.SetTitle(";"+VarName+"; #mu((p_{reco}-p_{MC})/p_{MC}) (MeV/c)")
     hpk_sigma = ROOT.gDirectory.Get("hpk_2")
-    hpk_sigma.SetTitle(";"+VarName+"; #sigma((p_{reco}-p_{MC})/p_{MC})")
+    hpk_sigma.SetTitle(";"+VarName+"; #sigma((p_{reco}-p_{MC})/p_{MC}) (MeV/c)")
 
     tree.Draw(Var+">>hlen("+BinsRangeVar+")",ParamType2+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracond,"colz")
     hlen = ROOT.gPad.GetPrimitive("hlen")
@@ -133,6 +133,239 @@ def Plot_prof_InRot(tree,ParamType1,ParamType2,Var,VarName,BinsRangeX,BinsRangeY
 
     hqq2.SaveAs(savemean)
 
+def Plot_prof(tree,ParamTypeMC,ParamType1,ParamType2,ParamFunc,ParamName,Var,VarName,BinsRangeX,BinsRangeY,BinsRangeVar,legenda1,legenda2,RangeUserYsigma,RangeUserYmean,savesigma,savemean,extracond,frac=True,extraform="",drawsecond = True):
+    
+    resInstr = "("+ParamTypeMC+"."+ParamFunc+"-"+ParamType1+"."+ParamFunc+")" 
+    if(frac): resInstr +=  "/"+ParamTypeMC+"."+ParamFunc
+    tree.Draw(resInstr+":"+Var+">>hpkGAr("+BinsRangeX+","+BinsRangeY+")",ParamType1+".fP[4]!=0!=0&&"+ParamTypeMC+".fP[4]!=0"+extracond,"colz")
+    hpkGAr = ROOT.gPad.GetPrimitive("hpkGAr")
+    hpkGAr.FitSlicesY()
+    hpkGAr_mean = ROOT.gDirectory.Get("hpkGAr_1")
+    hpkGAr_sigma = ROOT.gDirectory.Get("hpkGAr_2")
+    namemean = ";"+VarName+"; #mu("+ParamName+"_{reco}-"+ParamName+"_{MC})"
+    if(frac): namemean=";"+VarName+"; #mu(("+ParamName+"_{reco}-"+ParamName+"_{MC})/"+ParamName+"_{MC})"
+    hpkGAr_mean.SetTitle(namemean)
+    namesigma = ";"+VarName+"; #sigma("+ParamName+"_{reco}-"+ParamName+"_{MC})"
+    if(frac): namesigma = ";"+VarName+"; #sigma(("+ParamName+"_{reco}-"+ParamName+"_{MC})/"+ParamName+"_{MC})"
+    hpkGAr_sigma.SetTitle(namesigma)
+
+    resInstr2 = "("+ParamTypeMC+"."+ParamFunc+"-"+ParamType2+"."+ParamFunc+")" 
+    if(frac): resInstr2 +=  "/"+ParamTypeMC+"."+ParamFunc+extraform
+    tree.Draw(resInstr2+":"+Var+">>hpk("+BinsRangeX+","+BinsRangeY+")",ParamType2+".fP[4]!=0&&"+ParamTypeMC+".fP[4]!=0"+extracond,"colz")
+    hpk = ROOT.gPad.GetPrimitive("hpk")
+    hpk.FitSlicesY()
+    hpk_mean = ROOT.gDirectory.Get("hpk_1")
+    hpk_mean.SetTitle(namemean)
+    hpk_sigma = ROOT.gDirectory.Get("hpk_2")
+    hpk_sigma.SetTitle(namesigma)
+
+    tree.Draw(Var+">>hlen("+BinsRangeVar+")",ParamType2+".fP[4]!=0&&"+ParamTypeMC+".fP[4]!=0"+extracond,"colz")
+    hlen = ROOT.gPad.GetPrimitive("hlen")
+    hlen.SetTitle(";"+VarName+"; n_{ev}")
+
+    hpkGAr_sigma.SetMarkerStyle(20)
+    hpk_sigma.SetMarkerStyle(21)
+    hpk_sigma.SetMarkerColor(ROOT.kRed)
+    hpkGAr_mean.SetMarkerStyle(20)
+    hpk_mean.SetMarkerStyle(21)
+    hpk_mean.SetMarkerColor(ROOT.kRed)
+
+    ROOT.gStyle.SetOptStat(0)
+    hqq = ROOT.TCanvas("hqq","hqq",800,800)
+    hqq.Draw()
+    pad1 = ROOT.TPad("pad1", "pad1", 0, 0.35, 1, 1.0)
+    pad1.SetBottomMargin(0.015); # Upper and lower plot are joined
+    pad1.SetRightMargin(0.05); # Upper and lower plot are joined
+    pad1.SetLeftMargin(0.12); # Upper and lower plot are joined
+    pad1.SetGridx();         # Vertical grid
+    pad1.Draw();             # Draw the upper pad: pad1
+    pad1.cd();               # pad1 becomes the current pad
+    hpk_sigma.Draw()
+    hpk_sigma.GetYaxis().SetLabelSize(0.03)
+    hpk_sigma.GetXaxis().SetLabelSize(0.0)
+    hpk_sigma.GetYaxis().SetRangeUser(RangeUserYsigma[0],RangeUserYsigma[1])
+    axis = ROOT.TGaxis( -5, 20, -5, 220, 20,220,510,"")
+    axis.SetLabelFont(43) # Absolute font size in pixel (precision 3)
+    axis.SetLabelSize(15)
+    axis.Draw()
+
+    if(drawsecond): hpkGAr_sigma.Draw("same")
+    legend = ROOT.TLegend(0.6,0.72,0.92,0.88)
+    #legend.SetBorderSize(0)
+    if(drawsecond): legend.AddEntry(hpkGAr_sigma,"GArSoft KF Res","pl")
+    legend.AddEntry(hpk_sigma,"New KF Res","pl")
+    legend.Draw()
+    hqq.Draw()
+
+    hqq.cd();          # Go back to the main canvas before defining pad2
+    pad2 = ROOT.TPad("pad2", "pad2", 0, 0.05, 1, 0.3)
+    pad2.SetTopMargin(0.05)
+    pad2.SetBottomMargin(0.22)
+    pad2.SetRightMargin(0.05); # Upper and lower plot are joined
+    pad2.SetLeftMargin(0.12); # Upper and lower plot are joined
+    pad2.SetGridx() # vertical grid
+    pad2.Draw()
+    pad2.cd();       # pad2 becomes the current pad
+
+    hlen.GetYaxis().SetTitleSize(20)
+    hlen.GetYaxis().SetTitleFont(43)
+    hlen.GetYaxis().SetTitleOffset(1.55)
+    hlen.GetYaxis().SetLabelFont(43) # Absolute font size in pixel (precision 3)
+    hlen.GetYaxis().SetLabelSize(15)
+    hlen.GetYaxis().SetNdivisions(505)
+
+    hlen.GetXaxis().SetTitleSize(20)
+    hlen.GetXaxis().SetTitleFont(43)
+    hlen.GetXaxis().SetTitleOffset(1)
+    hlen.GetXaxis().SetLabelFont(43) # Absolute font size in pixel (precision 3)
+    hlen.GetXaxis().SetLabelSize(15)
+    hlen.Draw()
+
+    hqq.SaveAs(savesigma)
+
+    ROOT.gStyle.SetOptStat(0)
+    hqq2 = ROOT.TCanvas("hqq2","hqq2",800,800)
+    pad1m = ROOT.TPad("pad1m", "pad1m", 0, 0.35, 1, 1.0)
+    pad1m.SetBottomMargin(0.015); # Upper and lower plot are joined
+    pad1m.SetRightMargin(0.05); # Upper and lower plot are joined
+    pad1m.SetLeftMargin(0.12); # Upper and lower plot are joined
+    pad1m.SetGridx();         # Vertical grid
+    pad1m.Draw();             # Draw the upper pad: pad1
+    pad1m.cd();               # pad1 becomes the current pad
+    hpk_mean.Draw()
+    hpk_mean.GetYaxis().SetRangeUser(RangeUserYmean[0],RangeUserYmean[1])
+    hpk_mean.GetYaxis().SetLabelSize(0.03)
+    hpk_mean.GetXaxis().SetLabelSize(0.0)
+    axism = ROOT.TGaxis( -5, 20, -5, 220, 20,220,510,"")
+    axism.SetLabelFont(43) # Absolute font size in pixel (precision 3)
+    axism.SetLabelSize(15)
+    axism.Draw()
+
+    if(drawsecond): hpkGAr_mean.Draw("same")
+    legendm = ROOT.TLegend(0.6,0.72,0.92,0.88)
+    #legend.SetBorderSize(0)
+    if(drawsecond): legendm.AddEntry(hpkGAr_sigma,"GArSoft KF Bias","pl")
+    legendm.AddEntry(hpk_sigma,"New KF Bias","pl")
+    legendm.Draw()
+    hqq2.Draw()
+
+    hqq2.cd();          # Go back to the main canvas before defining pad2
+    pad2m = ROOT.TPad("pad2m", "pad2m", 0, 0.05, 1, 0.3)
+    pad2m.SetTopMargin(0.05)
+    pad2m.SetBottomMargin(0.22)
+    pad2m.SetRightMargin(0.05); # Upper and lower plot are joined
+    pad2m.SetLeftMargin(0.12); # Upper and lower plot are joined
+    pad2m.SetGridx() # vertical grid
+    pad2m.Draw()
+    pad2m.cd();       # pad2 becomes the current pad
+
+    hlen.Draw()
+
+    hqq2.SaveAs(savemean)
+
+
+def Plot_prof_from_histo(h,histoname,ParamName,VarName,legenda1,legenda2,RangeUserYsigma,RangeUserYmean,savesigma,savemean,dores=True,domean=False):
+    
+    #h.SetName("h")
+    fran = ROOT.TF1("fran","([2]*[1]) / ( TMath::Pi() * ([1]*[1] + (x-[0])*(x-[0])) )",-1000,1000) 
+    fran.SetParameters(0,5,100)
+    #fran.SetParLimits(2,0,200)
+    h.FitSlicesY(fran,0,-1,0,"QNRL")
+    #ROOT.gDirectory.GetList().Print()
+    h_mean = ROOT.gDirectory.Get(histoname+"_0")
+    h_sigma = ROOT.gDirectory.Get(histoname+"_1")
+    h_mean.SetTitle(";"+VarName+"; #mu("+ParamName+") (MeV/c)")
+    h_sigma.SetTitle(";"+VarName+"; #sigma("+ParamName+") (MeV/c)")
+
+    proj = h.ProjectionX()
+    proj.SetTitle(";"+VarName+"; n_{ev}")
+
+    h_sigma.SetMarkerStyle(20)
+    h_mean.SetMarkerStyle(20)
+
+    if(dores):
+        ROOT.gStyle.SetOptStat(0)
+        hqq = ROOT.TCanvas("hqq","hqq",800,800)
+        hqq.Draw()
+        pad1 = ROOT.TPad("pad1", "pad1", 0, 0.35, 1, 1.0)
+        pad1.SetBottomMargin(0.015); # Upper and lower plot are joined
+        pad1.SetRightMargin(0.05); # Upper and lower plot are joined
+        pad1.SetLeftMargin(0.12); # Upper and lower plot are joined
+        pad1.SetGridx();         # Vertical grid
+        pad1.Draw();             # Draw the upper pad: pad1
+        pad1.cd();               # pad1 becomes the current pad
+        h_sigma.GetYaxis().SetLabelSize(0.03)
+        h_sigma.GetXaxis().SetLabelSize(0.0)
+        h_sigma.GetYaxis().SetRangeUser(RangeUserYsigma[0],RangeUserYsigma[1])
+        h_sigma.Draw()
+
+        legend = ROOT.TLegend(0.6,0.72,0.92,0.88)
+        legend.AddEntry(h_sigma,legenda1,"pl")
+        legend.Draw("same")
+
+        hqq.cd();          # Go back to the main canvas before defining pad2
+        pad2 = ROOT.TPad("pad2", "pad2", 0, 0.05, 1, 0.3)
+        pad2.SetTopMargin(0.05)
+        pad2.SetBottomMargin(0.22)
+        pad2.SetRightMargin(0.05); # Upper and lower plot are joined
+        pad2.SetLeftMargin(0.12); # Upper and lower plot are joined
+        pad2.SetGridx() # vertical grid
+        pad2.Draw()
+        pad2.cd();       # pad2 becomes the current pad
+
+        proj.GetYaxis().SetTitleSize(20)
+        proj.GetYaxis().SetTitleFont(43)
+        proj.GetYaxis().SetTitleOffset(1.55)
+        proj.GetYaxis().SetLabelFont(43) # Absolute font size in pixel (precision 3)
+        proj.GetYaxis().SetLabelSize(15)
+        proj.GetYaxis().SetNdivisions(505)
+
+        proj.GetXaxis().SetTitleSize(20)
+        proj.GetXaxis().SetTitleFont(43)
+        proj.GetXaxis().SetTitleOffset(1)
+        proj.GetXaxis().SetLabelFont(43) # Absolute font size in pixel (precision 3)
+        proj.GetXaxis().SetLabelSize(15)
+        proj.Draw()
+
+        hqq.Draw()
+        hqq.SaveAs(savesigma)
+
+    if(domean):
+        ROOT.gStyle.SetOptStat(0)
+        hqq2 = ROOT.TCanvas("hqq2","hqq2",800,800)
+        pad1m = ROOT.TPad("pad1m", "pad1m", 0, 0.35, 1, 1.0)
+        pad1m.SetBottomMargin(0.015); # Upper and lower plot are joined
+        pad1m.SetRightMargin(0.05); # Upper and lower plot are joined
+        pad1m.SetLeftMargin(0.12); # Upper and lower plot are joined
+        pad1m.SetGridx();         # Vertical grid
+        pad1m.Draw();             # Draw the upper pad: pad1
+        pad1m.cd();               # pad1 becomes the current pad
+        h_mean.GetYaxis().SetRangeUser(RangeUserYmean[0],RangeUserYmean[1])
+        h_mean.GetYaxis().SetLabelSize(0.03)
+        h_mean.GetXaxis().SetLabelSize(0.0)
+        h_mean.Draw()
+
+        h_mean.Draw("same")
+        legendm = ROOT.TLegend(0.6,0.72,0.92,0.88)
+        #legend.SetBorderSize(0)
+        legendm.AddEntry(h_sigma,legenda2,"pl")
+        legendm.Draw()
+
+        hqq2.cd();          # Go back to the main canvas before defining pad2
+        pad2m = ROOT.TPad("pad2m", "pad2m", 0, 0.05, 1, 0.3)
+        pad2m.SetTopMargin(0.05)
+        pad2m.SetBottomMargin(0.22)
+        pad2m.SetRightMargin(0.05); # Upper and lower plot are joined
+        pad2m.SetLeftMargin(0.12); # Upper and lower plot are joined
+        pad2m.SetGridx() # vertical grid
+        pad2m.Draw()
+        pad2m.cd();       # pad2 becomes the current pad
+
+        proj.Draw()
+        hqq2.Draw()
+
+        hqq2.SaveAs(savemean)
+
 
 def Plot_prof_Unit(tree,ParamType,ParamMCType,Var,VarName,BinsRangeX,BinsRangeY,BinsRangeVar,RangeUserYsigma,savesigma,extracond):
     tree.Draw("("+ParamType+".fP[4]-"+ParamMCType+".fP[4])/sqrt("+ParamType+".fC[14]):"+Var+">>huseed4la("+BinsRangeX+","+BinsRangeY+")",extracond,"colz")
@@ -230,9 +463,9 @@ def Plot_prof_Unit(tree,ParamType,ParamMCType,Var,VarName,BinsRangeX,BinsRangeY,
 
 
 
-def Plot_residuals(tree, ParamType,save0,save1,save2,save3,save4,savep2gaus,savepgaus,ranges,extracon,plimits):
+def Plot_residuals(tree, ParamType,ParamMCType,save0,save1,save2,save3,save4,savep2gaus,savepgaus,ranges,extracon,plimits):
     hq0 = ROOT.TCanvas("hq0","hq0",800,600)
-    tree.Draw("(fParamMC[0].fP[0]-"+ParamType+".fP[0])/fParamMC[0].fP[0]>>htemp0(100,-0.1,0.1)",ParamType+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracon)
+    tree.Draw("("+ParamMCType+".fP[0]-"+ParamType+".fP[0])/"+ParamMCType+".fP[0]>>htemp0(100,-0.1,0.1)",ParamType+".fP[4]!=0&&"+ParamMCType+".fP[4]!=0"+extracon)
     h0 = ROOT.gPad.GetPrimitive("htemp0")
     h0.GetYaxis().SetRangeUser(ranges[0],ranges[1])
     h0.SetTitle("param 0 residual;(p0_{reco}-p0_{MC})/p0_{MC};n")
@@ -242,7 +475,7 @@ def Plot_residuals(tree, ParamType,save0,save1,save2,save3,save4,savep2gaus,save
     hq0.SaveAs(save0)
 
     hq1 = ROOT.TCanvas("hq1","hq1",800,600)
-    tree.Draw("(fParamMC[0].fP[1]-"+ParamType+".fP[1])/fParamMC[0].fP[1]>>htemp1(100,-0.2,0.2)",ParamType+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracon)
+    tree.Draw("("+ParamMCType+".fP[1]-"+ParamType+".fP[1])/"+ParamMCType+".fP[1]>>htemp1(100,-0.2,0.2)",ParamType+".fP[4]!=0&&"+ParamMCType+".fP[4]!=0"+extracon)
     h1 = ROOT.gPad.GetPrimitive("htemp1")
     h1.GetYaxis().SetRangeUser(ranges[2],ranges[3])
     h1.SetTitle("param 1 residual;(p1_{reco}-p1_{MC})/p1_{MC};n")
@@ -251,7 +484,7 @@ def Plot_residuals(tree, ParamType,save0,save1,save2,save3,save4,savep2gaus,save
     hq1.SaveAs(save1)
 
     hq2 = ROOT.TCanvas("hq2","hq2",800,600)
-    tree.Draw("(fParamMC[0].fP[2]-"+ParamType+".fP[2])/fParamMC[0].fP[2]>>htemp2(100,-0.2,0.2)",ParamType+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracon)
+    tree.Draw("("+ParamMCType+".fP[2]-"+ParamType+".fP[2])/"+ParamMCType+".fP[2]>>htemp2(100,-2,2)",ParamType+".fP[4]!=0&&"+ParamMCType+".fP[4]!=0"+extracon)
     h2 = ROOT.gPad.GetPrimitive("htemp2")
     h2.SetTitle("param 2 residual;(p2_{reco}-p2_{MC})/p2_{MC};n")
     h2.GetYaxis().SetRangeUser(ranges[4],ranges[5])
@@ -260,7 +493,7 @@ def Plot_residuals(tree, ParamType,save0,save1,save2,save3,save4,savep2gaus,save
     hq2.SaveAs(save2)
 
     hq3 = ROOT.TCanvas("hq3","hq3",800,600)
-    tree.Draw("(fParamMC[0].fP[3]-"+ParamType+".fP[3])/fParamMC[0].fP[3]>>htemp3(100,-0.2,0.2)",ParamType+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracon)
+    tree.Draw("("+ParamMCType+".fP[3]-"+ParamType+".fP[3])/"+ParamMCType+".fP[3]>>htemp3(100,-0.2,0.2)",ParamType+".fP[4]!=0&&"+ParamMCType+".fP[4]!=0"+extracon)
     h3 = ROOT.gPad.GetPrimitive("htemp3")
     h3.SetTitle("param 3 residual;(p3_{reco}-p3_{MC})/p3_{MC};n")
     h3.GetYaxis().SetRangeUser(ranges[6],ranges[7])
@@ -269,7 +502,7 @@ def Plot_residuals(tree, ParamType,save0,save1,save2,save3,save4,savep2gaus,save
     hq3.SaveAs(save3)
 
     hq4 = ROOT.TCanvas("hq4","hq4",800,600)
-    tree.Draw("(fParamMC[0].fP[4]-"+ParamType+".fP[4])/fParamMC[0].fP[4]>>htemp4(100,-0.3,0.3)",ParamType+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracon)
+    tree.Draw("("+ParamMCType+".fP[4]-"+ParamType+".fP[4])/"+ParamMCType+".fP[4]>>htemp4(100,-0.3,0.3)",ParamType+".fP[4]!=0&&"+ParamMCType+".fP[4]!=0"+extracon)
     h4 = ROOT.gPad.GetPrimitive("htemp4")
     h4.SetTitle("param 4 residual;(p4_{reco}-p4_{MC})/p4_{MC};n")
     h4.GetYaxis().SetRangeUser(ranges[8],ranges[9])
@@ -280,7 +513,7 @@ def Plot_residuals(tree, ParamType,save0,save1,save2,save3,save4,savep2gaus,save
     ROOT.gStyle.SetOptFit(kTRUE)
     ROOT.gStyle.SetOptStat(1010)
     hqp = ROOT.TCanvas("hqp","hqp",800,600)
-    tree.Draw("(fParamMC[0].GetP()-"+ParamType+".GetP())/fParamMC[0].GetP()>>htempp("+plimits+")",ParamType+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracon,"E")
+    tree.Draw("("+ParamMCType+".GetP()-"+ParamType+".GetP())/"+ParamMCType+".GetP()>>htempp("+plimits+")",ParamType+".fP[4]!=0&&"+ParamMCType+".fP[4]!=0"+extracon,"E")
     hp = ROOT.gPad.GetPrimitive("htempp")
     hp.SetLineWidth(2)
     hp.SetMarkerSize(0.9)
@@ -304,7 +537,7 @@ def Plot_residuals(tree, ParamType,save0,save1,save2,save3,save4,savep2gaus,save
 
     ROOT.gStyle.SetOptFit(kTRUE)
     hqpg = ROOT.TCanvas("hqpg","hqpg",800,600)
-    tree.Draw("(fParamMC[0].GetP()-"+ParamType+".GetP())/fParamMC[0].GetP()>>htempp2(40,-0.1,0.1)",ParamType+".fP[4]!=0&&fParamMC[0].fP[4]!=0"+extracon,"E")
+    tree.Draw("("+ParamMCType+".GetP()-"+ParamType+".GetP())/"+ParamMCType+".GetP()>>htempp2(40,-0.1,0.1)",ParamType+".fP[4]!=0&&"+ParamMCType+".fP[4]!=0"+extracon,"E")
     hp2 = ROOT.gPad.GetPrimitive("htempp2")
     hp2.SetLineWidth(2)
     hp2.SetMarkerSize(0.9)
